@@ -36,6 +36,7 @@ Configure it in your MCP client:
 | --- | --- | --- |
 | `http_request` | Sends an HTTP request and returns status, headers, and body. | `method` (required), `url` (required), `headers` (optional JSON object), `query` (optional raw query string), `body` (optional), `multipart` (optional JSON object for file uploads), `timeoutSeconds`, `followRedirects` |
 | `list_secret_headers` | Lists the secret header names the server can fill from its environment (never the values). | — |
+| `parse_openapi` | Parses an OpenAPI/Swagger JSON or YAML document into testable endpoints, including parameters, content types, schemas, and generated example request bodies. | `url` or `specification` (one required), `headers` (optional) |
 
 `http_request` supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, and `QUERY`. `QUERY` is a safe, idempotent method for sending a query in the request body (like a read-only POST; RFC 9110 extension). Query strings are appended to the URL as-is; bodies default to `application/json` when they look like JSON. Responses are rendered as status line + response headers + body (bodies over 100 KB are truncated).
 
@@ -60,6 +61,37 @@ http_request(
 Each file entry needs either `path` (a local file on the server) or `contentBase64` (or `contentBase64Url`). `field` (default `file`), `fileName`, and `contentType` (inferred from the extension when omitted) are optional. Repeat the same `field` to upload multiple files under one name.
 
 Paths are read with the server's own permissions. To limit which directories the server may read, set `APIMCP_FILE_ROOTS` to a semicolon- or newline-separated list of allowed directories; any path outside those roots is rejected.
+
+### OpenAPI / Swagger parsing
+
+Use `parse_openapi` before testing an unfamiliar API. It accepts either a URL to `swagger.json` / `openapi.json` (or YAML) or the raw specification text.
+
+For each endpoint it returns:
+
+- HTTP method and path
+- path/query/header parameters, including required flags and schema examples
+- every request-body content type
+- request-body schema, including referenced component schemas
+- a generated `requestBody.example` suitable for sending as the `body` argument of `http_request`
+
+Example:
+
+```
+parse_openapi(url: "https://example.com/swagger/v1/swagger.json")
+```
+
+For a JSON endpoint, use the returned example directly:
+
+```
+http_request(
+  method: "POST",
+  url: "https://example.com/api/orders",
+  headers: {"Content-Type": "application/json"},
+  body: "{...the generated requestBody.example...}"
+)
+```
+
+The parser supports OpenAPI 3.x and Swagger 2.0 JSON/YAML through Microsoft.OpenApi.
 
 ### Secret headers
 
