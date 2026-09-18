@@ -1,0 +1,27 @@
+# Build results
+bin/
+obj/
+
+# NuGet
+*.nupkg
+*.snupkg
+artifacts/
+
+# Publish output
+publish/
+publish-single/
+publish-aot/
+
+# Visual Studio
+.vs/
+*.user
+
+# IDE
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Env / secrets
+.env
