@@ -2,7 +2,7 @@
 
 [![NuGet version](https://img.shields.io/nuget/v/ApiMcp.Dnx.svg)](https://www.nuget.org/packages/ApiMcp.Dnx/)
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server for calling HTTP APIs. Built on the official **MCP C# SDK 2.0** (`ModelContextProtocol`) and `.NET 10`, over **stdio**. Use it as an API client and testing tool for your LLM tool-calling workflow: the LLM can send GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS / QUERY requests with custom headers, query strings and bodies — while secrets are sourced from environment variables on the server side and are never exposed to the model.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server for calling HTTP APIs. Built on the official **MCP C# SDK 2.0** (`ModelContextProtocol`) and **.NET 10**, over **stdio**. Use it as an API client and testing tool for your LLM tool-calling workflow: the LLM can send GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS / QUERY requests with custom headers, query strings and bodies — while secrets are sourced from environment variables on the server side and are never exposed to the model.
 
 ## Quick start with `dnx`
 
@@ -93,6 +93,33 @@ http_request(
 
 The parser supports OpenAPI 3.x and Swagger 2.0 JSON/YAML through Microsoft.OpenApi.
 
+#### Public Swagger test documents
+
+Use the public Swagger Petstore documents to test `parse_openapi` without setting up your own API. Swagger's own documentation references the Petstore Swagger URL, and Swagger UI also uses a public Petstore OpenAPI definition as its example. citeturn0search0turn0search6
+
+Swagger 2.0:
+
+```
+parse_openapi(url: "https://petstore.swagger.io/v2/swagger.json")
+```
+
+OpenAPI 3.x:
+
+```
+parse_openapi(url: "https://petstore3.swagger.io/api/v3/openapi.json")
+```
+
+End-to-end test:
+
+```
+1. parse_openapi(url: "https://petstore3.swagger.io/api/v3/openapi.json")
+2. Select POST /pet
+3. Take the returned requestBody.example
+4. Call http_request(method: "POST", url: "<baseUrl>/pet", headers: {"Content-Type": "application/json"}, body: "<example>")
+```
+
+The OpenAPI specification is designed so tools can understand and interact with HTTP APIs with minimal implementation logic. citeturn0search11
+
 ### Secret headers
 
 Sensitive headers are declared server-side with a **name → environment variable** mapping. When the LLM sends a request that includes one of these header names, the server replaces the value with the one from the mapped environment variable. The model never sees the secret and cannot override it.
@@ -136,14 +163,14 @@ Logs go to stderr only (stdout is reserved for MCP JSON). Secret values never ap
 
 ```
 cd ApiMcp
-dotnet publish -c Release -r win-x64 /p:PublishAot=false /p:PublishSingleFile=true --self-contained false -o .\bin\publish-single
+dotnet publish -c Release -r win-x64 /p:PublishAot=false /p:PublishSingleFile=true --self-contained false -o .\\bin\\publish-single
 ```
 
 ### Native AOT (fast startup, no runtime install)
 
 ```
-$env:PATH = "C:\Program Files (x86)\Microsoft Visual Studio\Installer;" + $env:PATH
-dotnet publish -c Release -r win-x64 -o .\bin\publish-aot
+$env:PATH = "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer;" + $env:PATH
+dotnet publish -c Release -r win-x64 -o .\\bin\\publish-aot
 ```
 
 ## NuGet publishing
@@ -167,7 +194,7 @@ http_request(
 
 The response body contains `accessToken` (and `refreshToken`). Use it as a Bearer token in the next calls.
 
-2. Call an auth-protected endpoint (pass the token literally here, or wire `Authorization` through a secret header instead — see below):
+2. Call an auth-protected endpoint:
 
 ```
 http_request(
