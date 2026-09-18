@@ -33,6 +33,7 @@ builder.Services
     .AddMcpServer()
     .WithStdioServerTransport()
     // generic WithTools<T> keeps metadata for trim/AOT (WithToolsFromAssembly does not)
-    .WithTools<HttpTool>();
+    .WithTools<HttpTool>()
+    .WithTools<OpenApiTool>();
 
 await builder.Build().RunAsync();
