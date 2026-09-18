@@ -96,6 +96,67 @@ dotnet publish -c Release -r win-x64 -o .\bin\publish-aot
 
 Pushing a `v*` tag triggers the `.github/workflows/dnx.yml` workflow, which packs `ApiMcp.Dnx` and publishes it to NuGet.org using **OIDC trusted publishing** (no API key stored in the repo). You can also trigger it manually via *Actions → Run workflow* with an optional `package_version`.
 
+## Testing example (public CRUD API with auth)
+
+[DummyJSON](https://dummyjson.com/docs/auth) is a free API with JWT auth and full CRUD — ideal for trying the server. `emilys` / `emilyspass` is a public demo account.
+
+1. Login to get an access token:
+
+```
+http_request(
+  method: "POST",
+  url: "https://dummyjson.com/auth/login",
+  headers: {"Content-Type": "application/json"},
+  body: "{\"username\":\"emilys\",\"password\":\"emilyspass\"}"
+)
+```
+
+The response body contains `accessToken` (and `refreshToken`). Use it as a Bearer token in the next calls.
+
+2. Call an auth-protected endpoint (pass the token literally here, or wire `Authorization` through a secret header instead — see below):
+
+```
+http_request(
+  method: "GET",
+  url: "https://dummyjson.com/auth/me",
+  headers: {"Authorization": "Bearer eyJhbGciOi..."}
+)
+```
+
+3. Update an existing product (PUT):
+
+```
+http_request(
+  method: "PUT",
+  url: "https://dummyjson.com/auth/products/1",
+  headers: {"Content-Type": "application/json", "Authorization": "Bearer eyJhbGciOi..."},
+  body: "{\"price\":101}"
+)
+```
+
+4. Delete it (DELETE):
+
+```
+http_request(
+  method: "DELETE",
+  url: "https://dummyjson.com/auth/products/1",
+  headers: {"Authorization": "Bearer eyJhbGciOi..."}
+)
+```
+
+> Tip: because the token is dynamic, it is fine to pass it literally. For a **fixed** secret (e.g. a GitHub PAT), prefer a secret header mapping so the value never reaches the model:
+
+```
+dnx ApiMcp.Dnx@1.0.0 --yes --header-env "Authorization=MY_GITHUB_PAT"
+# then call: http_request(method: "GET", url: "https://api.github.com/user", headers: {"Authorization": "ignored"})
+```
+
+### Running over `dnx` (no install)
+
+```
+dnx ApiMcp.Dnx@1.0.0 --yes
+```
+
 ## License
 
 [MIT](LICENSE)
