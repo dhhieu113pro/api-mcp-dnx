@@ -5,7 +5,13 @@ internal static class HttpHelper
     private const int MaxBodyChars = 100_000;
 
     private static readonly HashSet<string> AllowedMethods = new(
-        ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+        ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "QUERY"],
+        StringComparer.OrdinalIgnoreCase);
+
+    // Headers that belong to HttpContent, not HttpRequestMessage.Headers.
+    private static readonly HashSet<string> ContentHeaderNames = new(
+        ["Content-Type", "Content-Length", "Content-Encoding", "Content-Language", "Content-Location",
+         "Content-Range", "Content-MD5", "Content-Disposition", "Expires", "Last-Modified", "Allow"],
         StringComparer.OrdinalIgnoreCase);
 
     internal static string Send(
@@ -40,8 +46,9 @@ internal static class HttpHelper
 
             using var request = new HttpRequestMessage(new HttpMethod(method), url);
 
-            ApplyHeaders(request, headersJson);
+            // Body first so content headers (e.g. Content-Type) have an HttpContent to attach to.
             ApplyBody(request, body, headersJson);
+            ApplyHeaders(request, headersJson);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             using var response = client.Send(request, HttpCompletionOption.ResponseContentRead);
@@ -106,12 +113,18 @@ internal static class HttpHelper
                 var resolved = HeaderStore.Resolve(prop.Name, prop.Value.GetString());
                 if (string.IsNullOrEmpty(resolved))
                     continue;
-                request.Headers.Remove(prop.Name);
-                if (!request.Headers.TryAddWithoutValidation(prop.Name, resolved))
+
+                if (ContentHeaderNames.Contains(prop.Name))
                 {
                     request.Content ??= new System.Net.Http.StringContent("");
-                    var ok = request.Content.Headers.TryAddWithoutValidation(prop.Name, resolved);
-                    if (!ok)
+                    request.Content.Headers.Remove(prop.Name);
+                    if (!request.Content.Headers.TryAddWithoutValidation(prop.Name, resolved))
+                        throw new InvalidOperationException($"Unable to set header '{prop.Name}'.");
+                }
+                else
+                {
+                    request.Headers.Remove(prop.Name);
+                    if (!request.Headers.TryAddWithoutValidation(prop.Name, resolved))
                         throw new InvalidOperationException($"Unable to set header '{prop.Name}'.");
                 }
             }

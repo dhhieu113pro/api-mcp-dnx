@@ -9,9 +9,9 @@ namespace ApiMcp.AI.Tools;
 public class HttpTool
 {
     [McpServerTool, Description("""
- Sends an HTTP request (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS) to a URL and returns the status code, response headers, and response body. Use this as an API client for testing REST / HTTP endpoints.
+ Sends an HTTP request (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, QUERY) to a URL and returns the status code, response headers, and response body. Use this as an API client for testing REST / HTTP endpoints.
 
- - `method`: HTTP method.
+ - `method`: HTTP method. QUERY is a safe, idempotent method for sending a query in the request body (like a read-only POST; RFC 9110 extension).
  - `url`: absolute URL, e.g. https://example.com/api/items
  - `headers`: optional JSON object, e.g. {"Content-Type": "application/json"}. Header values are literal strings. A header that is configured as a secret on the server is always filled from the server's environment and the value you pass is ignored (see list_secret_headers).
  - `query`: optional raw query string, e.g. "page=1&size=10", appended to the URL as-is.

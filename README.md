@@ -2,14 +2,14 @@
 
 [![NuGet version](https://img.shields.io/nuget/v/ApiMcp.Dnx.svg)](https://www.nuget.org/packages/ApiMcp.Dnx/)
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server for calling HTTP APIs. Built on the official **MCP C# SDK 2.0** (`ModelContextProtocol`) and `.NET 10`, over **stdio**. Use it as an API client and testing tool for your LLM tool-calling workflow: the LLM can send GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS requests with custom headers, query strings and bodies — while secrets are sourced from environment variables on the server side and are never exposed to the model.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server for calling HTTP APIs. Built on the official **MCP C# SDK 2.0** (`ModelContextProtocol`) and `.NET 10`, over **stdio**. Use it as an API client and testing tool for your LLM tool-calling workflow: the LLM can send GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS / QUERY requests with custom headers, query strings and bodies — while secrets are sourced from environment variables on the server side and are never exposed to the model.
 
 ## Quick start with `dnx`
 
 Requires the .NET 10 SDK. Run the latest published package directly from NuGet.org:
 
 ```
-dnx ApiMcp.Dnx@1.0.0 --yes
+dnx ApiMcp.Dnx@1.0.1 --yes
 ```
 
 Configure it in your MCP client:
@@ -19,7 +19,7 @@ Configure it in your MCP client:
   "mcpServers": {
     "api": {
       "command": "dnx",
-      "args": ["ApiMcp.Dnx@1.0.0", "--yes"],
+      "args": ["ApiMcp.Dnx@1.0.1", "--yes"],
       "env": {
         "APIMCP_HEADER_ENV": "Authorization=MY_API_TOKEN;X-Api-Key=MY_API_KEY",
         "MY_API_TOKEN": "your-secret-token",
@@ -37,7 +37,7 @@ Configure it in your MCP client:
 | `http_request` | Sends an HTTP request and returns status, headers, and body. | `method` (required), `url` (required), `headers` (optional JSON object), `query` (optional raw query string), `body` (optional), `timeoutSeconds`, `followRedirects` |
 | `list_secret_headers` | Lists the secret header names the server can fill from its environment (never the values). | — |
 
-`http_request` supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`. Query strings are appended to the URL as-is; bodies default to `application/json` when they look like JSON. Responses are rendered as status line + response headers + body (bodies over 100 KB are truncated).
+`http_request` supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, and `QUERY`. `QUERY` is a safe, idempotent method for sending a query in the request body (like a read-only POST; RFC 9110 extension). Query strings are appended to the URL as-is; bodies default to `application/json` when they look like JSON. Responses are rendered as status line + response headers + body (bodies over 100 KB are truncated).
 
 ### Secret headers
 
@@ -46,7 +46,7 @@ Sensitive headers are declared server-side with a **name → environment variabl
 Configure mappings either per-process:
 
 ```
-dnx ApiMcp.Dnx@1.0.0 --yes --header-env "Authorization=MY_API_TOKEN" --header-env "X-Api-Key=MY_API_KEY"
+dnx ApiMcp.Dnx@1.0.1 --yes --header-env "Authorization=MY_API_TOKEN" --header-env "X-Api-Key=MY_API_KEY"
 ```
 
 or via the `APIMCP_HEADER_ENV` environment variable (semicolon-separated):
@@ -147,14 +147,14 @@ http_request(
 > Tip: because the token is dynamic, it is fine to pass it literally. For a **fixed** secret (e.g. a GitHub PAT), prefer a secret header mapping so the value never reaches the model:
 
 ```
-dnx ApiMcp.Dnx@1.0.0 --yes --header-env "Authorization=MY_GITHUB_PAT"
+dnx ApiMcp.Dnx@1.0.1 --yes --header-env "Authorization=MY_GITHUB_PAT"
 # then call: http_request(method: "GET", url: "https://api.github.com/user", headers: {"Authorization": "ignored"})
 ```
 
 ### Running over `dnx` (no install)
 
 ```
-dnx ApiMcp.Dnx@1.0.0 --yes
+dnx ApiMcp.Dnx@1.0.1 --yes
 ```
 
 ## License
