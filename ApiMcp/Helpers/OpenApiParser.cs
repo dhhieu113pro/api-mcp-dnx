@@ -36,9 +36,8 @@ internal sealed class OpenApiParser
         {
             ["title"] = _document.Info?.Title,
             ["version"] = _document.Info?.Version,
-            ["openapi"] = _document.OpenApi,
             ["baseUrls"] = GetBaseUrls(),
-            ["endpoints"] = _document.Paths
+            ["endpoints"] = (_document.Paths ?? [])
                 .OrderBy(p => p.Key, StringComparer.Ordinal)
                 .SelectMany(p => p.Value.Operations
                     .OrderBy(o => o.Key.ToString(), StringComparer.Ordinal)
@@ -64,7 +63,7 @@ internal sealed class OpenApiParser
 
     private object DescribeOperation(string path, OperationType method, OpenApiOperation operation)
     {
-        var parameters = operation.Parameters
+        var parameters = (operation.Parameters ?? [])
             .Select(p => new
             {
                 name = p.Name,
@@ -76,14 +75,14 @@ internal sealed class OpenApiParser
             })
             .ToArray();
 
-        var requestBodies = operation.RequestBody?.Content
+        var requestBodies = operation.RequestBody?.Content?
             .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
             .Select(x => new
             {
                 contentType = x.Key,
                 required = operation.RequestBody.Required,
                 schema = SchemaDescription(x.Value.Schema),
-                example = ExampleForSchema(x.Value.Schema, x.Value.Example ?? operation.RequestBody.Example)
+                example = ExampleForSchema(x.Value.Schema, x.Value.Example)
             })
             .ToArray() ?? [];
 
@@ -97,7 +96,8 @@ internal sealed class OpenApiParser
             parameters,
             requestBody = requestBodies.FirstOrDefault(),
             requestBodies,
-            responses = operation.Responses.Keys.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
+            responses = (operation.Responses ?? [])
+                .Keys.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
             security = operation.Security?.Count > 0
                 ? operation.Security.SelectMany(x => x.Keys).Distinct(StringComparer.Ordinal).ToArray()
                 : null
