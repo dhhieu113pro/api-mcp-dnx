@@ -6,6 +6,7 @@ using ApiMcp.AI.Tools;
 using ApiMcp.Helpers;
 
 HeaderStore.LoadFromArgsAndEnv(args);
+FileAccessPolicy.LoadFromEnv();
 
 if (HeaderStore.SecretMappings.Count > 0)
 {
@@ -16,6 +17,11 @@ else
 {
     Console.Error.WriteLine("[apimcp] no secret headers configured. Use --header-env Name=ENV_VAR or APIMCP_HEADER_ENV.");
 }
+
+if (FileAccessPolicy.Enforced)
+    Console.Error.WriteLine($"[apimcp] multipart file roots: {string.Join(", ", FileAccessPolicy.Roots)}");
+else
+    Console.Error.WriteLine("[apimcp] multipart file access unrestricted. Set APIMCP_FILE_ROOTS to restrict allowed directories.");
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.AddConsole(consoleLogOptions =>

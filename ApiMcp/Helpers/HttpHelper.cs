@@ -20,6 +20,7 @@ internal static class HttpHelper
         string? headersJson,
         string? query,
         string? body,
+        string? multipartJson,
         int timeoutSeconds,
         bool followRedirects)
     {
@@ -46,9 +47,18 @@ internal static class HttpHelper
 
             using var request = new HttpRequestMessage(new HttpMethod(method), url);
 
-            // Body first so content headers (e.g. Content-Type) have an HttpContent to attach to.
-            ApplyBody(request, body, headersJson);
-            ApplyHeaders(request, headersJson);
+            if (!string.IsNullOrWhiteSpace(multipartJson))
+            {
+                // Multipart sets its own boundary; ignore any user-supplied Content-Type.
+                ApplyMultipart(request, multipartJson);
+                ApplyHeaders(request, headersJson, skipContentType: true);
+            }
+            else
+            {
+                // Body first so content headers (e.g. Content-Type) have an HttpContent to attach to.
+                ApplyBody(request, body, headersJson);
+                ApplyHeaders(request, headersJson);
+            }
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             using var response = client.Send(request, HttpCompletionOption.ResponseContentRead);
@@ -79,7 +89,7 @@ internal static class HttpHelper
         return url + separator + query.Trim().TrimStart('?');
     }
 
-    private static void ApplyHeaders(HttpRequestMessage request, string? headersJson)
+    private static void ApplyHeaders(HttpRequestMessage request, string? headersJson, bool skipContentType = false)
     {
         if (string.IsNullOrWhiteSpace(headersJson))
             return;
@@ -101,6 +111,9 @@ internal static class HttpHelper
 
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
+                if (skipContentType && ContentHeaderNames.Contains(prop.Name))
+                    continue;
+
                 if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.Null)
                 {
                     if (!HeaderStore.IsSecret(prop.Name))
@@ -129,6 +142,141 @@ internal static class HttpHelper
                 }
             }
         }
+    }
+
+    private static void ApplyMultipart(HttpRequestMessage request, string multipartJson)
+    {
+        System.Text.Json.JsonDocument doc;
+        try
+        {
+            doc = System.Text.Json.JsonDocument.Parse(multipartJson);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            throw new InvalidOperationException("'multipart' must be a JSON object like {\"fields\":{...},\"files\":[{...}]}.", ex);
+        }
+
+        using (doc)
+        {
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+                throw new InvalidOperationException("'multipart' must be a JSON object.");
+
+            var form = new System.Net.Http.MultipartFormDataContent();
+            int count = 0;
+
+            if (doc.RootElement.TryGetProperty("fields", out var fields))
+            {
+                if (fields.ValueKind != System.Text.Json.JsonValueKind.Object)
+                    throw new InvalidOperationException("'multipart.fields' must be a JSON object.");
+                foreach (var f in fields.EnumerateObject())
+                {
+                    var value = f.Value.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? f.Value.GetString()
+                        : f.Value.GetRawText();
+                    form.Add(new System.Net.Http.StringContent(value ?? string.Empty), f.Name);
+                    count++;
+                }
+            }
+
+            if (doc.RootElement.TryGetProperty("files", out var files))
+            {
+                if (files.ValueKind != System.Text.Json.JsonValueKind.Array)
+                    throw new InvalidOperationException("'multipart.files' must be a JSON array.");
+                foreach (var file in files.EnumerateArray())
+                {
+                    AddFile(form, file);
+                    count++;
+                }
+            }
+
+            if (count == 0)
+                throw new InvalidOperationException("'multipart' must contain at least one field or file.");
+
+            request.Content = form;
+        }
+    }
+
+    private static void AddFile(System.Net.Http.MultipartFormDataContent form, System.Text.Json.JsonElement file)
+    {
+        if (file.ValueKind != System.Text.Json.JsonValueKind.Object)
+            throw new InvalidOperationException("Each 'multipart.files' item must be a JSON object.");
+
+        var field = GetString(file, "field") ?? "file";
+        var fileName = GetString(file, "fileName");
+        var contentType = GetString(file, "contentType");
+        var path = GetString(file, "path");
+        var base64 = GetString(file, "contentBase64");
+        var base64Url = GetString(file, "contentBase64Url");
+
+        byte[] bytes;
+        if (!string.IsNullOrEmpty(path))
+        {
+            var full = FileAccessPolicy.Resolve(path);
+            fileName ??= Path.GetFileName(full);
+            bytes = File.ReadAllBytes(full);
+        }
+        else if (!string.IsNullOrEmpty(base64) || !string.IsNullOrEmpty(base64Url))
+        {
+            var payload = base64 ?? base64Url!;
+            if (!string.IsNullOrEmpty(base64Url))
+                payload = base64Url.Replace('-', '+').Replace('_', '/');
+            try
+            {
+                bytes = Convert.FromBase64String(payload);
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidOperationException($"File '{field}': base64 content is not valid.", ex);
+            }
+            fileName ??= field;
+        }
+        else
+        {
+            throw new InvalidOperationException($"File '{field}' needs either 'path' or 'contentBase64'.");
+        }
+
+        contentType ??= GuessContentTypeFromName(fileName);
+        var content = new System.Net.Http.ByteArrayContent(bytes);
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+        form.Add(content, field, fileName);
+    }
+
+    private static string? GetString(System.Text.Json.JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String
+            ? v.GetString()
+            : null;
+
+    private static string GuessContentTypeFromName(string fileName)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            ".pdf" => "application/pdf",
+            ".json" => "application/json",
+            ".xml" => "application/xml",
+            ".txt" or ".log" => "text/plain",
+            ".csv" => "text/csv",
+            ".html" or ".htm" => "text/html",
+            ".zip" => "application/zip",
+            ".gz" => "application/gzip",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".ppt" => "application/vnd.ms-powerpoint",
+            ".pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".mp3" => "audio/mpeg",
+            ".mp4" => "video/mp4",
+            ".wav" => "audio/wav",
+            ".webm" => "video/webm",
+            _ => "application/octet-stream",
+        };
     }
 
     private static void ApplyBody(HttpRequestMessage request, string? body, string? headersJson)
