@@ -52,26 +52,19 @@ internal sealed class OpenApiParser
 
     private string[] GetBaseUrls()
     {
-        if (_document.Servers is { Count: > 0 })
-            return _document.Servers.Select(s => s.Url).ToArray();
-
-        var scheme = _document.Schemes?.FirstOrDefault()?.ToString() ?? "http";
-        var host = _document.Host;
-        if (!string.IsNullOrWhiteSpace(host))
-            return [$"{scheme}://{host}{_document.BasePath}"];
-
-        return [];
+        return _document.Servers is { Count: > 0 }
+            ? _document.Servers.Select(s => s.Url).ToArray()
+            : [];
     }
 
     private object DescribeOperation(string path, OperationType method, OpenApiOperation operation)
     {
         // Parameters can be defined at both Path Item and Operation level.
-        // Swagger 2.0 body/formData parameters are handled as a fallback below.
+        // Swagger 2.0 body/formData parameters are normalized by OpenAPI.NET
+        // into Operation.RequestBody when reading a Swagger 2.0 document.
         var allParameters = GetParameters(path, operation);
-        var bodyParameters = allParameters.Where(p => p.In == ParameterLocation.Body).ToArray();
 
         var parameters = allParameters
-            .Where(p => p.In != ParameterLocation.Body && p.In != ParameterLocation.FormData)
             .Select(p => new
             {
                 name = p.Name,
@@ -94,42 +87,6 @@ internal sealed class OpenApiParser
             })
             .ToList() ?? [];
 
-        // Swagger 2.0 uses in: body instead of OpenAPI 3 requestBody.
-        if (requestBodies.Count == 0 && bodyParameters.Length > 0)
-        {
-            var bodyParameter = bodyParameters[0];
-            foreach (var contentType in GetSwaggerConsumes(operation))
-            {
-                requestBodies.Add(new
-                {
-                    contentType,
-                    required = bodyParameter.Required,
-                    schema = SchemaDescription(bodyParameter.Schema),
-                    example = ExampleForSchema(bodyParameter.Schema, bodyParameter.Example)
-                });
-            }
-        }
-
-        // Swagger 2.0 formData parameters become an executable form request.
-        var formParameters = allParameters.Where(p => p.In == ParameterLocation.FormData).ToArray();
-        if (formParameters.Length > 0 && !requestBodies.Any(x =>
-            x.contentType.Equals("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase) ||
-            x.contentType.Equals("multipart/form-data", StringComparison.OrdinalIgnoreCase)))
-        {
-            var hasFile = formParameters.Any(p => p.Extensions?.ContainsKey("x-ms-file") == true ||
-                p.Schema?.Format?.Equals("binary", StringComparison.OrdinalIgnoreCase) == true);
-            requestBodies.Add(new
-            {
-                contentType = hasFile ? "multipart/form-data" : "application/x-www-form-urlencoded",
-                required = formParameters.Any(p => p.Required),
-                schema = new
-                {
-                    type = "object",
-                    properties = formParameters.ToDictionary(p => p.Name, p => SchemaDescription(p.Schema), StringComparer.Ordinal)
-                },
-                example = formParameters.ToDictionary(p => p.Name, p => ExampleForSchema(p.Schema, p.Example), StringComparer.Ordinal)
-            });
-        }
         return new
         {
             method = method.ToString().ToUpperInvariant(),
@@ -143,7 +100,12 @@ internal sealed class OpenApiParser
             responses = (operation.Responses ?? [])
                 .Keys.OrderBy(x => x, StringComparer.Ordinal).ToArray(),
             security = operation.Security?.Count > 0
-                ? operation.Security.SelectMany(x => x.Keys).Distinct(StringComparer.Ordinal).ToArray()
+                ? operation.Security
+                    .SelectMany(x => x.Keys)
+                    .Select(x => x.Reference?.Id ?? x.Scheme ?? x.Name)
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray()
                 : null
         };
     }
@@ -158,13 +120,6 @@ internal sealed class OpenApiParser
             .ToArray();
     }
 
-    private string[] GetSwaggerConsumes(OpenApiOperation operation)
-    {
-        if (operation.RequestBody?.Content?.Count > 0)
-            return operation.RequestBody.Content.Keys.ToArray();
-
-        return ["application/json"];
-    }
     private object? SchemaDescription(OpenApiSchema? schema)
     {
         if (schema is null)
