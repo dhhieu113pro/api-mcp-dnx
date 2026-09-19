@@ -86,7 +86,8 @@ internal static class HttpHelper
             return url;
 
         var separator = url.Contains('?') ? "&" : "?";
-        return url + separator + query.Trim().TrimStart('?');
+        var processed = QueryParamStore.Apply(query.Trim().TrimStart('?'));
+        return url + separator + processed;
     }
 
     private static void ApplyHeaders(HttpRequestMessage request, string? headersJson, bool skipContentType = false)
@@ -131,14 +132,12 @@ internal static class HttpHelper
                 {
                     request.Content ??= new System.Net.Http.StringContent("");
                     request.Content.Headers.Remove(prop.Name);
-                    if (!request.Content.Headers.TryAddWithoutValidation(prop.Name, resolved))
-                        throw new InvalidOperationException($"Unable to set header '{prop.Name}'.");
+                    request.Content.Headers.TryAddWithoutValidation(prop.Name, resolved);
                 }
                 else
                 {
                     request.Headers.Remove(prop.Name);
-                    if (!request.Headers.TryAddWithoutValidation(prop.Name, resolved))
-                        throw new InvalidOperationException($"Unable to set header '{prop.Name}'.");
+                    request.Headers.TryAddWithoutValidation(prop.Name, resolved);
                 }
             }
         }
@@ -171,9 +170,9 @@ internal static class HttpHelper
                 foreach (var f in fields.EnumerateObject())
                 {
                     var value = f.Value.ValueKind == System.Text.Json.JsonValueKind.String
-                        ? f.Value.GetString()
+                        ? f.Value.GetString()!
                         : f.Value.GetRawText();
-                    form.Add(new System.Net.Http.StringContent(value ?? string.Empty), f.Name);
+                    form.Add(new System.Net.Http.StringContent(value), f.Name);
                     count++;
                 }
             }
@@ -288,9 +287,7 @@ internal static class HttpHelper
 
         request.Content = new System.Net.Http.StringContent(body, System.Text.Encoding.UTF8);
         request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
-
-        if (body is { Length: > 0 })
-            request.Content.Headers.ContentLength = System.Text.Encoding.UTF8.GetByteCount(body);
+        request.Content.Headers.ContentLength = System.Text.Encoding.UTF8.GetByteCount(body);
     }
 
     private static string? ResolveContentType(string? headersJson)

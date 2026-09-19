@@ -129,4 +129,13 @@ public sealed class HeaderStoreTests : IDisposable
 
         Assert.Equal(["auth", "b-header"], HeaderStore.SecretNames());
     }
+
+    [Fact]
+    public void AddMapping_WhitespaceNameOrEnv_IsIgnored()
+    {
+        HeaderStore.AddMapping("   ", "X");
+        HeaderStore.AddMapping("X", "   ");
+
+        Assert.Empty(HeaderStore.SecretMappings);
+    }
 }

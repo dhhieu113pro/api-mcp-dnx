@@ -30,9 +30,6 @@ internal sealed class OpenApiParser
             throw new InvalidOperationException($"Unable to parse the OpenAPI/Swagger document: {ex.Message}", ex);
         }
 
-        if (document is null)
-            throw new InvalidOperationException("Unable to parse the OpenAPI/Swagger document.");
-
         if (diagnostic.Errors.Count > 0)
         {
             var errors = diagnostic.Errors
@@ -54,10 +51,10 @@ internal sealed class OpenApiParser
     {
         var root = new Dictionary<string, object?>
         {
-            ["title"] = _document.Info?.Title,
-            ["version"] = _document.Info?.Version,
+            ["title"] = _document.Info!.Title,
+            ["version"] = _document.Info!.Version,
             ["baseUrls"] = GetBaseUrls(),
-            ["endpoints"] = (_document.Paths ?? [])
+            ["endpoints"] = _document.Paths!
                 .OrderBy(p => p.Key, StringComparer.Ordinal)
                 .SelectMany(p => p.Value.Operations
                     .OrderBy(o => o.Key.ToString(), StringComparer.Ordinal)
@@ -130,7 +127,7 @@ internal sealed class OpenApiParser
 
     private IReadOnlyList<OpenApiParameter> GetParameters(string path, OpenApiOperation operation)
     {
-        var pathParameters = _document.Paths?[path].Parameters ?? [];
+        var pathParameters = _document.Paths[path].Parameters ?? [];
         return pathParameters
             .Concat(operation.Parameters ?? [])
             .GroupBy(p => $"{p.In}:{p.Name}", StringComparer.OrdinalIgnoreCase)

@@ -36,6 +36,7 @@ Configure it in your MCP client:
 | --- | --- | --- |
 | `http_request` | Sends an HTTP request and returns status, headers, and body. | `method` (required), `url` (required), `headers` (optional JSON object), `query` (optional raw query string), `body` (optional), `multipart` (optional JSON object for file uploads), `timeoutSeconds`, `followRedirects` |
 | `list_secret_headers` | Lists the secret header names the server can fill from its environment (never the values). | — |
+| `list_secret_query_params` | Lists the secret query-string parameter names the server fills from its environment (never the values). | — |
 | `parse_openapi` | Parses an OpenAPI/Swagger JSON or YAML document into testable endpoints, including parameters, content types, schemas, and generated example request bodies. | `url` or `specification` (one required), `headers` (optional) |
 
 `http_request` supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, and `QUERY`. `QUERY` is a safe, idempotent method for sending a query in the request body (like a read-only POST; RFC 9110 extension). Query strings are appended to the URL as-is; bodies default to `application/json` when they look like JSON. Responses are rendered as status line + response headers + body (bodies over 100 KB are truncated).
@@ -137,6 +138,22 @@ APIMCP_HEADER_ENV="Authorization=MY_API_TOKEN;X-Api-Key=MY_API_KEY"
 ```
 
 The LLM discovers these names via `list_secret_headers` and simply includes them in the `headers` object of `http_request`; the running server injects the real value.
+
+### Secret query parameters
+
+Some APIs expect an API key on the query string (e.g. `?api_key=...`). The same mapping pattern applies to query parameters, so the secret value is also never exposed to the model:
+
+```
+dnx ApiMcp.Dnx@1.1.0 --yes --query-env "api_key=MY_API_KEY"
+```
+
+or via the `APIMCP_QUERY_ENV` environment variable (semicolon-separated):
+
+```
+APIMCP_QUERY_ENV="api_key=MY_API_KEY"
+```
+
+The LLM discovers these names via `list_secret_query_params`, puts the name in the `query` argument of `http_request` (any value it passes is ignored), and the running server injects the real value.
 
 ## Build & Run
 

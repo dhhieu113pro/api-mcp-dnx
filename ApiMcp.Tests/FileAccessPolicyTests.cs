@@ -31,6 +31,7 @@ public sealed class FileAccessPolicyTests : IDisposable
     public void Dispose()
     {
         Environment.SetEnvironmentVariable("APIMCP_FILE_ROOTS", _originalEnv);
+        FileAccessPolicy.LoadFromEnv();
         Directory.Delete(_rootDir, recursive: true);
         Directory.Delete(_outsideDir, recursive: true);
     }
