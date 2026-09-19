@@ -2,7 +2,7 @@
 
 [![NuGet version](https://img.shields.io/nuget/v/ApiMcp.Dnx.svg)](https://www.nuget.org/packages/ApiMcp.Dnx/)
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server for calling HTTP APIs. Built on the official **MCP C# SDK 2.0** (`ModelContextProtocol`) and `.NET 10`, over **stdio**. Use it as an API client and testing tool for your LLM tool-calling workflow: the LLM can send GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS / QUERY requests with custom headers, query strings and bodies — while secrets are sourced from environment variables on the server side and are never exposed to the model.
+A [Model Context Protocol](https://modelcontextprotocol.io/) server for calling HTTP APIs. Built on the official **MCP C# SDK 2.0** (`ModelContextProtocol`) and **.NET 10**, over **stdio**. Use it as an API client and testing tool for your LLM tool-calling workflow: the LLM can send GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS / QUERY requests with custom headers, query strings and bodies — while secrets are sourced from environment variables on the server side and are never exposed to the model.
 
 ## Quick start with `dnx`
 
@@ -36,6 +36,7 @@ Configure it in your MCP client:
 | --- | --- | --- |
 | `http_request` | Sends an HTTP request and returns status, headers, and body. | `method` (required), `url` (required), `headers` (optional JSON object), `query` (optional raw query string), `body` (optional), `multipart` (optional JSON object for file uploads), `timeoutSeconds`, `followRedirects` |
 | `list_secret_headers` | Lists the secret header names the server can fill from its environment (never the values). | — |
+| `parse_openapi` | Parses an OpenAPI/Swagger JSON or YAML document into testable endpoints, including parameters, content types, schemas, and generated example request bodies. | `url` or `specification` (one required), `headers` (optional) |
 
 `http_request` supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, and `QUERY`. `QUERY` is a safe, idempotent method for sending a query in the request body (like a read-only POST; RFC 9110 extension). Query strings are appended to the URL as-is; bodies default to `application/json` when they look like JSON. Responses are rendered as status line + response headers + body (bodies over 100 KB are truncated).
 
@@ -60,6 +61,64 @@ http_request(
 Each file entry needs either `path` (a local file on the server) or `contentBase64` (or `contentBase64Url`). `field` (default `file`), `fileName`, and `contentType` (inferred from the extension when omitted) are optional. Repeat the same `field` to upload multiple files under one name.
 
 Paths are read with the server's own permissions. To limit which directories the server may read, set `APIMCP_FILE_ROOTS` to a semicolon- or newline-separated list of allowed directories; any path outside those roots is rejected.
+
+### OpenAPI / Swagger parsing
+
+Use `parse_openapi` before testing an unfamiliar API. It accepts either a URL to `swagger.json` / `openapi.json` (or YAML) or the raw specification text.
+
+For each endpoint it returns:
+
+- HTTP method and path
+- path/query/header parameters, including required flags and schema examples
+- every request-body content type
+- request-body schema, including referenced component schemas
+- a generated `requestBody.example` suitable for sending as the `body` argument of `http_request`
+
+Example:
+
+```
+parse_openapi(url: "https://example.com/swagger/v1/swagger.json")
+```
+
+For a JSON endpoint, use the returned example directly:
+
+```
+http_request(
+  method: "POST",
+  url: "https://example.com/api/orders",
+  headers: {"Content-Type": "application/json"},
+  body: "{...the generated requestBody.example...}"
+)
+```
+
+The parser supports OpenAPI 3.x and Swagger 2.0 JSON/YAML through Microsoft.OpenApi.
+
+#### Public Swagger test documents
+
+Use the public Swagger Petstore documents to test `parse_openapi` without setting up your own API. Swagger's own documentation references the Petstore Swagger URL, and Swagger UI also uses a public Petstore OpenAPI definition as its example. citeturn0search0turn0search6
+
+Swagger 2.0:
+
+```
+parse_openapi(url: "https://petstore.swagger.io/v2/swagger.json")
+```
+
+OpenAPI 3.x:
+
+```
+parse_openapi(url: "https://petstore3.swagger.io/api/v3/openapi.json")
+```
+
+End-to-end test:
+
+```
+1. parse_openapi(url: "https://petstore3.swagger.io/api/v3/openapi.json")
+2. Select POST /pet
+3. Take the returned requestBody.example
+4. Call http_request(method: "POST", url: "<baseUrl>/pet", headers: {"Content-Type": "application/json"}, body: "<example>")
+```
+
+The OpenAPI specification is designed so tools can understand and interact with HTTP APIs with minimal implementation logic. citeturn0search11
 
 ### Secret headers
 
@@ -104,14 +163,14 @@ Logs go to stderr only (stdout is reserved for MCP JSON). Secret values never ap
 
 ```
 cd ApiMcp
-dotnet publish -c Release -r win-x64 /p:PublishAot=false /p:PublishSingleFile=true --self-contained false -o .\bin\publish-single
+dotnet publish -c Release -r win-x64 /p:PublishAot=false /p:PublishSingleFile=true --self-contained false -o .\\bin\\publish-single
 ```
 
 ### Native AOT (fast startup, no runtime install)
 
 ```
-$env:PATH = "C:\Program Files (x86)\Microsoft Visual Studio\Installer;" + $env:PATH
-dotnet publish -c Release -r win-x64 -o .\bin\publish-aot
+$env:PATH = "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer;" + $env:PATH
+dotnet publish -c Release -r win-x64 -o .\\bin\\publish-aot
 ```
 
 ## NuGet publishing
@@ -135,7 +194,7 @@ http_request(
 
 The response body contains `accessToken` (and `refreshToken`). Use it as a Bearer token in the next calls.
 
-2. Call an auth-protected endpoint (pass the token literally here, or wire `Authorization` through a secret header instead — see below):
+2. Call an auth-protected endpoint:
 
 ```
 http_request(

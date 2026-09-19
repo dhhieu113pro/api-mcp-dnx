@@ -1,6 +1,8 @@
 name: Build and publish NuGet package
 
 on:
+  pull_request:
+    branches: [main]
   push:
     tags:
       - 'v*'
@@ -15,7 +17,25 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore ApiMcp.Tests/ApiMcp.Tests.csproj
+
+      - name: Test
+        run: dotnet test ApiMcp.Tests/ApiMcp.Tests.csproj --configuration Release --no-restore
+
   package:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
     permissions:
