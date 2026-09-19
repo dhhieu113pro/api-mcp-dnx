@@ -35,6 +35,7 @@ jobs:
         run: dotnet test ApiMcp.Tests/ApiMcp.Tests.csproj --configuration Release --no-restore
 
   package:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment: production
     permissions:
