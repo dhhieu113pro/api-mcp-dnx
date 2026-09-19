@@ -19,41 +19,8 @@ internal static class HeaderStore
 
     public static void LoadFromArgsAndEnv(string[] args)
     {
-        // 1) CLI: --header-env "Authorization=API_AUTH_TOKEN" (repeatable)
-        for (int i = 0; i < args.Length - 1; i++)
-        {
-            if (args[i] != "--header-env")
-                continue;
-            for (int j = i + 1; j < args.Length; j++)
-            {
-                if (args[j].StartsWith("--"))
-                    break;
-                var (name, envVar) = SplitMapping(args[j]);
-                if (name is not null)
-                    AddMapping(name, envVar!);
-            }
-        }
-
-        // 2) Env var: APIMCP_HEADER_ENV="Authorization=API_AUTH_TOKEN;X-Key=API_KEY"
-        var fromEnv = Environment.GetEnvironmentVariable("APIMCP_HEADER_ENV");
-        if (!string.IsNullOrWhiteSpace(fromEnv))
-        {
-            foreach (var entry in fromEnv.Split([';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries))
-            {
-                var (name, envVar) = SplitMapping(entry);
-                if (name is not null)
-                    AddMapping(name, envVar!);
-            }
-        }
-    }
-
-    // Returns (null, null) when the entry has no '='.
-    private static (string? name, string? envVar) SplitMapping(string entry)
-    {
-        var eq = entry.IndexOf('=');
-        if (eq <= 0)
-            return (null, null);
-        return (entry[..eq].Trim().Trim('\'', '"'), entry[(eq + 1)..].Trim().Trim('\'', '"'));
+        foreach (var (name, envVar) in SecretMapping.Load(args, "--header-env", "APIMCP_HEADER_ENV"))
+            AddMapping(name, envVar);
     }
 
     // True when the given header name is owned by the server.

@@ -6,6 +6,7 @@ using ApiMcp.AI.Tools;
 using ApiMcp.Helpers;
 
 HeaderStore.LoadFromArgsAndEnv(args);
+QueryParamStore.LoadFromArgsAndEnv(args);
 FileAccessPolicy.LoadFromEnv();
 
 if (HeaderStore.SecretMappings.Count > 0)
@@ -16,6 +17,16 @@ if (HeaderStore.SecretMappings.Count > 0)
 else
 {
     Console.Error.WriteLine("[apimcp] no secret headers configured. Use --header-env Name=ENV_VAR or APIMCP_HEADER_ENV.");
+}
+
+if (QueryParamStore.SecretMappings.Count > 0)
+{
+    var qMasked = string.Join(", ", QueryParamStore.SecretMappings.Select(kv => $"{kv.Key} -> env[{kv.Value}]"));
+    Console.Error.WriteLine($"[apimcp] secret query parameters: {qMasked}");
+}
+else
+{
+    Console.Error.WriteLine("[apimcp] no secret query parameters configured. Use --query-env Name=ENV_VAR or APIMCP_QUERY_ENV.");
 }
 
 if (FileAccessPolicy.Enforced)
