@@ -9,6 +9,8 @@ internal static class HeaderStore
     // Logical header name -> environment variable that holds the secret value.
     public static Dictionary<string, string> SecretMappings { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+    internal static void Clear() => SecretMappings.Clear();
+
     public static void AddMapping(string name, string envVar)
     {
         if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(envVar))
@@ -30,7 +32,6 @@ internal static class HeaderStore
                 if (name is not null)
                     AddMapping(name, envVar!);
             }
-            break;
         }
 
         // 2) Env var: APIMCP_HEADER_ENV="Authorization=API_AUTH_TOKEN;X-Key=API_KEY"

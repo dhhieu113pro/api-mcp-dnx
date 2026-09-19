@@ -9,6 +9,7 @@ Environment: opencode session via API MCP tools (`http_request`, `list_secret_he
 | 2 | Swagger 2.0 / OpenAPI 3.x parse + test | [02-swagger-parse-test.md](02-swagger-parse-test.md) | PASS |
 | 3 | Multipart file upload | [03-multipart-upload.md](03-multipart-upload.md) | PASS |
 | 4 | Methods/params gap fill (PATCH, OPTIONS, HEAD, QUERY, query, redirects, timeout, YAML) | [04-coverage-gap-fill.md](04-coverage-gap-fill.md) | PASS |
+| 5 | Automated tests for secret headers, FILE_ROOTS, truncation (found + fixed `--header-env` bug) | [05-automated-tests.md](05-automated-tests.md) | PASS |
 
 ## Tool checks
 
@@ -28,4 +29,5 @@ Environment: opencode session via API MCP tools (`http_request`, `list_secret_he
 - `QUERY` verb verified to transit correctly; no public API implements it to
   demonstrate a `200` (expect 404/501 from upstream).
 - NOT covered (needs server restart/config): secret headers, `APIMCP_FILE_ROOTS`,
-  >100 KB truncation.
+  >100 KB truncation — now covered by automated tests (see [05-automated-tests.md](05-automated-tests.md)),
+  including a fix for repeatable `--header-env`.
