@@ -2,6 +2,7 @@ using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Interfaces;
 using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Readers;
+using Microsoft.OpenApi.Readers.Exceptions;
 using System.Text.Json;
 
 namespace ApiMcp.Helpers;
@@ -18,15 +19,32 @@ internal sealed class OpenApiParser
             throw new InvalidOperationException("'specification' is required.");
 
         var reader = new OpenApiStringReader();
-        var document = reader.Read(specification, out var diagnostic);
+        OpenApiDocument document;
+        OpenApiDiagnostic diagnostic;
+        try
+        {
+            document = reader.Read(specification, out diagnostic);
+        }
+        catch (OpenApiUnsupportedSpecVersionException ex)
+        {
+            throw new InvalidOperationException($"Unable to parse the OpenAPI/Swagger document: {ex.Message}", ex);
+        }
 
         if (document is null)
             throw new InvalidOperationException("Unable to parse the OpenAPI/Swagger document.");
 
         if (diagnostic.Errors.Count > 0)
         {
-            var errors = string.Join("; ", diagnostic.Errors.Take(8).Select(e => e.Message));
-            throw new InvalidOperationException($"OpenAPI/Swagger parse errors: {errors}");
+            var errors = diagnostic.Errors
+                .Where(e => !string.Equals(
+                    e.Message,
+                    "Responses must contain at least one response",
+                    StringComparison.OrdinalIgnoreCase))
+                .Take(8)
+                .Select(e => e.Message);
+            var message = string.Join("; ", errors);
+            if (!string.IsNullOrWhiteSpace(message))
+                throw new InvalidOperationException($"OpenAPI/Swagger parse errors: {message}");
         }
 
         return new OpenApiParser(document);
