@@ -8,7 +8,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>ApiMcp.Dnx</PackageId>
-    <VersionPrefix>1.1.0</VersionPrefix>
+    <VersionPrefix>1.2.0</VersionPrefix>
     <Authors>ApiMcp contributors</Authors>
     <Description>Model Context Protocol server for calling HTTP APIs. API client and testing tool for LLMs, with secret headers sourced from environment variables.</Description>
     <PackageTags>mcp;model-context-protocol;http;rest;api;client;testing</PackageTags>
