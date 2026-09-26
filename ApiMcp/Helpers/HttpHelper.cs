@@ -1,5 +1,9 @@
 namespace ApiMcp.Helpers;
 
+internal sealed record HttpExchange(int StatusCode, string? ReasonPhrase, string Body, long ElapsedMs);
+
+internal sealed class HttpHelperException(string message) : Exception(message);
+
 internal static class HttpHelper
 {
     private const int MaxBodyChars = 100_000;
@@ -80,6 +84,56 @@ internal static class HttpHelper
         }
     }
 
+    internal static HttpExchange Execute(
+        string method,
+        string url,
+        string? headersJson,
+        string? query,
+        string? body,
+        string? multipartJson,
+        int timeoutSeconds,
+        bool followRedirects)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            throw new HttpHelperException("'url' is required.");
+
+        method = method.Trim().ToUpperInvariant();
+        if (!AllowedMethods.Contains(method))
+            throw new HttpHelperException($"unsupported HTTP method '{method}'. Allowed: {string.Join(", ", AllowedMethods.OrderBy(m => m))}.");
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out _))
+            throw new HttpHelperException($"'{url}' is not a valid absolute URL.");
+
+        url = ApplyQueryString(url, query);
+
+        using var client = new HttpClient(new SocketsHttpHandler
+        {
+            AllowAutoRedirect = followRedirects,
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate | System.Net.DecompressionMethods.Brotli,
+        });
+        client.Timeout = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds));
+
+        using var request = new HttpRequestMessage(new HttpMethod(method), url);
+
+        if (!string.IsNullOrWhiteSpace(multipartJson))
+        {
+            ApplyMultipart(request, multipartJson);
+            ApplyHeaders(request, headersJson, skipContentType: true);
+        }
+        else
+        {
+            ApplyBody(request, body, headersJson);
+            ApplyHeaders(request, headersJson);
+        }
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        using var response = client.Send(request, HttpCompletionOption.ResponseContentRead);
+        sw.Stop();
+
+        var content = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+        return new HttpExchange((int)response.StatusCode, response.ReasonPhrase, content, sw.ElapsedMilliseconds);
+    }
+
     private static string ApplyQueryString(string url, string? query)
     {
         if (string.IsNullOrWhiteSpace(query))
@@ -119,6 +173,23 @@ internal static class HttpHelper
                 {
                     if (!HeaderStore.IsSecret(prop.Name))
                         throw new InvalidOperationException($"Header '{prop.Name}' has no value and no secret mapping is configured for it.");
+                    if (!HeaderStore.AllowPlain)
+                        continue;
+                    // In allow-plain mode, explicit null means "inject the secret".
+                    var secretOnly = HeaderStore.Resolve(prop.Name, null);
+                    if (string.IsNullOrEmpty(secretOnly))
+                        continue;
+                    if (ContentHeaderNames.Contains(prop.Name))
+                    {
+                        request.Content ??= new System.Net.Http.StringContent("");
+                        request.Content.Headers.Remove(prop.Name);
+                        request.Content.Headers.TryAddWithoutValidation(prop.Name, secretOnly);
+                    }
+                    else
+                    {
+                        request.Headers.Remove(prop.Name);
+                        request.Headers.TryAddWithoutValidation(prop.Name, secretOnly);
+                    }
                     continue;
                 }
                 if (prop.Value.ValueKind != System.Text.Json.JsonValueKind.String)

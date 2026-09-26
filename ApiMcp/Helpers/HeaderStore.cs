@@ -4,12 +4,25 @@ namespace ApiMcp.Helpers;
 // Each mapping says: when the tool receives a header named <Name>, read its
 // value from the process environment variable <EnvVar> instead of trusting the
 // LLM-supplied value. Secrets never appear in tool params, logs, or prompts.
+//
+// For test environments, pass --allow-plain-headers (or set
+// APIMCP_ALLOW_PLAIN_HEADERS=true / APIMCP_ALLOW_PLAIN=true) to let a
+// caller-supplied non-empty header value win over the secret. To still use the
+// secret in that mode, pass null for the header value (or omit empty handling:
+// an empty value falls back to the secret).
 internal static class HeaderStore
 {
     // Logical header name -> environment variable that holds the secret value.
     public static Dictionary<string, string> SecretMappings { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    internal static void Clear() => SecretMappings.Clear();
+    // When true, a non-empty caller-supplied value overrides the secret mapping.
+    public static bool AllowPlain { get; private set; }
+
+    internal static void Clear()
+    {
+        SecretMappings.Clear();
+        AllowPlain = false;
+    }
 
     public static void AddMapping(string name, string envVar)
     {
@@ -21,17 +34,23 @@ internal static class HeaderStore
     {
         foreach (var (name, envVar) in SecretMapping.Load(args, "--header-env", "APIMCP_HEADER_ENV"))
             AddMapping(name, envVar);
+        AllowPlain = SecretMapping.LoadBoolFlag(args, "--allow-plain-headers", "APIMCP_ALLOW_PLAIN_HEADERS")
+            || SecretMapping.LoadBoolFlag(args, "--allow-plain", "APIMCP_ALLOW_PLAIN");
     }
 
     // True when the given header name is owned by the server.
     public static bool IsSecret(string name) => SecretMappings.ContainsKey(name);
 
-    // Resolves the value for a request header. Secret headers always win over
-    // anything the LLM supplied; a missing env var surfaces as a clear error.
+    // Resolves the value for a request header. By default secret headers always
+    // win over anything the LLM supplied; a missing env var surfaces as a clear
+    // error. When AllowPlain is on, a non-empty caller value is used as-is (no
+    // env lookup), while a null/empty/whitespace value still resolves the secret.
     public static string? Resolve(string name, string? llmValue)
     {
         if (SecretMappings.TryGetValue(name, out var envVar))
         {
+            if (AllowPlain && !string.IsNullOrWhiteSpace(llmValue))
+                return llmValue;
             var secret = Environment.GetEnvironmentVariable(envVar);
             if (string.IsNullOrEmpty(secret))
                 throw new InvalidOperationException(
