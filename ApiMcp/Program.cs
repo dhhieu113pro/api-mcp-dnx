@@ -18,6 +18,8 @@ else
 {
     Console.Error.WriteLine("[apimcp] no secret headers configured. Use --header-env Name=ENV_VAR or APIMCP_HEADER_ENV.");
 }
+if (HeaderStore.AllowPlain)
+    Console.Error.WriteLine("[apimcp] plain header override allowed (--allow-plain-headers). Non-empty caller values are sent as-is; null injects the secret.");
 
 if (QueryParamStore.SecretMappings.Count > 0)
 {
@@ -28,6 +30,8 @@ else
 {
     Console.Error.WriteLine("[apimcp] no secret query parameters configured. Use --query-env Name=ENV_VAR or APIMCP_QUERY_ENV.");
 }
+if (QueryParamStore.AllowPlain)
+    Console.Error.WriteLine("[apimcp] plain query override allowed (--allow-plain-query). Non-empty caller values are kept as-is; empty value injects the secret.");
 
 if (FileAccessPolicy.Enforced)
     Console.Error.WriteLine($"[apimcp] multipart file roots: {string.Join(", ", FileAccessPolicy.Roots)}");
@@ -45,6 +49,7 @@ builder.Services
     .WithStdioServerTransport()
     // generic WithTools<T> keeps metadata for trim/AOT (WithToolsFromAssembly does not)
     .WithTools<HttpTool>()
-    .WithTools<OpenApiTool>();
+    .WithTools<OpenApiTool>()
+    .WithTools<PostmanTool>();
 
 await builder.Build().RunAsync();
