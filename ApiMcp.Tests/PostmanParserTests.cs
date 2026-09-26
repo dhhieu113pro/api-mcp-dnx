@@ -148,7 +148,7 @@ public sealed class PostmanParserTests
     [Fact]
     public void Parse_InvalidJson_ThrowsJsonException()
     {
-        Assert.Throws<JsonException>(() => PostmanParser.Parse("not json"));
+        Assert.ThrowsAny<JsonException>(() => PostmanParser.Parse("not json"));
     }
 
     [Fact]

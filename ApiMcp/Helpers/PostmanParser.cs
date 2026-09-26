@@ -77,7 +77,7 @@ internal static partial class PostmanParser
                 sb.AppendLine($"    header {header.Name}: {value}");
             }
             var contentType = item.ContentType ?? GuessContentType(item.Body);
-            if (contentType.Length > 0)
+            if (contentType is { Length: > 0 })
                 sb.AppendLine($"    content-type: {contentType}");
             if (item.Body is not null)
                 sb.AppendLine($"    body: {ResolveVariables(item.Body, collection.Variables)}");
@@ -147,7 +147,8 @@ internal static partial class PostmanParser
 
     private static PostmanItem ParseItem(JsonElement node, string name, string folder, JsonElement request)
     {
-        var method = (GetString(request, "method") ?? "GET").Trim().ToUpperInvariant();
+        var rawMethod = GetString(request, "method");
+        var method = string.IsNullOrWhiteSpace(rawMethod) ? "GET" : rawMethod.Trim().ToUpperInvariant();
         var url = GetUrl(request);
 
         var headers = new List<PostmanHeader>();
@@ -283,11 +284,16 @@ internal static partial class PostmanParser
         var query = GetString(graphQl, "query") ?? "";
         var variables = Get(graphQl, "variables");
         var variablesText = variables is { } v && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
-        return JsonSerializer.Serialize(new Dictionary<string, string?>
-        {
-            ["query"] = query,
-            ["variables"] = variablesText,
-        });
+        return JsonSerializer.Serialize(
+            new Dictionary<string, string?>
+            {
+                ["query"] = query,
+                ["variables"] = variablesText,
+            },
+            new JsonSerializerOptions
+            {
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            });
     }
 
     private static string CollectTestScript(JsonElement node)
