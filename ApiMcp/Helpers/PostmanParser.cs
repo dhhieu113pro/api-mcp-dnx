@@ -326,7 +326,7 @@ internal static partial class PostmanParser
 
         foreach (var block in Regex.Split(script, @"(?=pm\.test\()"))
         {
-            var name = Regex.Match(block, @"pm\.test\(\s*""([^""]*)""").Groups[1].Value;
+            var name = Regex.Match(block, @"pm\.test\(\s*([""'`])((?:(?!\1).)*)\1").Groups[2].Value;
             if (name.Length == 0)
                 continue;
             int? expectedStatus = null;
