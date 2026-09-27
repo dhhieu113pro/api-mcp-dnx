@@ -9,7 +9,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server for calling 
 Requires the .NET 10 SDK. Run the latest published package directly from NuGet.org:
 
 ```
-dnx ApiMcp.Dnx@1.3.0 --yes
+dnx ApiMcp.Dnx@1.3.1 --yes
 ```
 
 Configure it in your MCP client:
@@ -19,7 +19,7 @@ Configure it in your MCP client:
   "mcpServers": {
     "api": {
       "command": "dnx",
-      "args": ["ApiMcp.Dnx@1.3.0", "--yes"],
+      "args": ["ApiMcp.Dnx@1.3.1", "--yes"],
       "env": {
         "APIMCP_HEADER_ENV": "Authorization=MY_API_TOKEN;X-Api-Key=MY_API_KEY",
         "MY_API_TOKEN": "your-secret-token",
@@ -128,7 +128,7 @@ Sensitive headers are declared server-side with a **name → environment variabl
 Configure mappings either per-process:
 
 ```
-dnx ApiMcp.Dnx@1.3.0 --yes --header-env "Authorization=MY_API_TOKEN" --header-env "X-Api-Key=MY_API_KEY"
+dnx ApiMcp.Dnx@1.3.1 --yes --header-env "Authorization=MY_API_TOKEN" --header-env "X-Api-Key=MY_API_KEY"
 ```
 
 or via the `APIMCP_HEADER_ENV` environment variable (semicolon-separated):
@@ -144,7 +144,7 @@ The LLM discovers these names via `list_secret_headers` and simply includes them
 By default a secret mapping always wins and the value the caller passes is ignored. For test environments where you want to pass header values directly from the tool parameters, start the server with plain override enabled:
 
 ```
-dnx ApiMcp.Dnx@1.3.0 --yes --allow-plain-headers
+dnx ApiMcp.Dnx@1.3.1 --yes --allow-plain-headers
 # or: --allow-plain (enables both headers and query)
 ```
 
@@ -168,7 +168,7 @@ Behavior when enabled:
 Some APIs expect an API key on the query string (e.g. `?api_key=...`). The same mapping pattern applies to query parameters, so the secret value is also never exposed to the model:
 
 ```
-dnx ApiMcp.Dnx@1.3.0 --yes --query-env "api_key=MY_API_KEY"
+dnx ApiMcp.Dnx@1.3.1 --yes --query-env "api_key=MY_API_KEY"
 ```
 
 or via the `APIMCP_QUERY_ENV` environment variable (semicolon-separated):
@@ -271,14 +271,14 @@ http_request(
 > Tip: because the token is dynamic, it is fine to pass it literally. For a **fixed** secret (e.g. a GitHub PAT), prefer a secret header mapping so the value never reaches the model:
 
 ```
-dnx ApiMcp.Dnx@1.3.0 --yes --header-env "Authorization=MY_GITHUB_PAT"
+dnx ApiMcp.Dnx@1.3.1 --yes --header-env "Authorization=MY_GITHUB_PAT"
 # then call: http_request(method: "GET", url: "https://api.github.com/user", headers: {"Authorization": "ignored"})
 ```
 
 ### Running over `dnx` (no install)
 
 ```
-dnx ApiMcp.Dnx@1.3.0 --yes
+dnx ApiMcp.Dnx@1.3.1 --yes
 ```
 
 ## License
