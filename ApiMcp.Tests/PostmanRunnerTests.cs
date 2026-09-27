@@ -106,6 +106,34 @@ public sealed class PostmanRunnerTests
         Assert.Contains("✓ \"Has total\" — body contains \"15\"", output);
     }
 
+    [Fact]
+    public void Run_BodyIncludeLiteral_ResolvesCollectionVariables()
+    {
+        using var server = new MiniHttpServer("""{"customerId":"c-7"}""", responseContentType: "application/json");
+        var collection = Collection(server,
+            Item("Get", "{{base}}customers/{{customerId}}", script:
+                "pm.test(\"Body has id\", function () {\n    pm.expect(pm.response.text()).to.include('{{customerId}}');\n});"));
+
+        var output = PostmanRunner.Run(collection, new Dictionary<string, string> { ["customerId"] = "c-7" }, 10, true);
+
+        Assert.Contains("✓ \"Body has id\" — body contains \"c-7\"", output);
+    }
+
+    [Fact]
+    public void Run_BodyIncludeLiteral_UsesVariablesSetByEarlierRequests()
+    {
+        using var server = new MiniHttpServer("""{"id":"w-1"}""", responseContentType: "application/json");
+        var collection = Collection(server,
+            Item("Create", "{{base}}items", script: StatusTest(200) +
+                "\npm.collectionVariables.set(\"itemId\", pm.response.json().id);"),
+            Item("Get", "{{base}}items/{{itemId}}", script:
+                "pm.test(\"Body has id\", function () {\n    pm.expect(pm.response.text()).to.include(\"{{itemId}}\");\n});"));
+
+        var output = PostmanRunner.Run(collection, null, 10, true);
+
+        Assert.Contains("✓ \"Body has id\" — body contains \"w-1\"", output);
+    }
+
     private static string StatusTest(int status) =>
         $"pm.test(\"Status code is {status}\", function () {{\n    pm.response.to.have.status({status});\n}});";
 

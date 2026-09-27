@@ -89,7 +89,7 @@ internal static partial class PostmanRunner
         }
 
         var lets = ParseLets(item.Script);
-        var passed = EvaluateTests(item, exchange, lets, out var testLines);
+        var passed = EvaluateTests(item, exchange, lets, variables, out var testLines);
         testLines.AddRange(ApplyVariableSets(item.Script, exchange, lets, variables));
 
         var label = item.Tests.Count == 0 ? NoTestLabel : passed ? "[PASS]" : "[FAIL]";
@@ -147,6 +147,7 @@ internal static partial class PostmanRunner
         PostmanItem item,
         HttpExchange exchange,
         IReadOnlyDictionary<string, string> lets,
+        IReadOnlyDictionary<string, string> variables,
         out List<string> testLines)
     {
         testLines = new List<string>();
@@ -165,7 +166,7 @@ internal static partial class PostmanRunner
             }
             foreach (var include in test.Includes)
             {
-                var (ok, includeDetail) = EvaluateInclude(exchange, include, lets);
+                var (ok, includeDetail) = EvaluateInclude(exchange, include, lets, variables);
                 testPassed &= ok;
                 parts.Add(includeDetail);
             }
@@ -183,11 +184,15 @@ internal static partial class PostmanRunner
     private static (bool Ok, string Detail) EvaluateInclude(
         HttpExchange exchange,
         string expression,
-        IReadOnlyDictionary<string, string> lets)
+        IReadOnlyDictionary<string, string> lets,
+        IReadOnlyDictionary<string, string> variables)
     {
         var value = ResolveIncludeValue(exchange.Body, expression, lets);
         if (value is null)
             return (false, $"could not evaluate body include of '{expression}'");
+        // A literal such as '{{customerId}}' is checked against the variable's current value.
+        if (Unquote(expression.Trim()) is not null)
+            value = PostmanParser.ResolveVariables(value, variables);
 
         var found = exchange.Body.Contains(value, StringComparison.Ordinal);
         var quoted = value.Length <= 60 ? $"\"{value}\"" : $"\"{value[..57]}…\"";
