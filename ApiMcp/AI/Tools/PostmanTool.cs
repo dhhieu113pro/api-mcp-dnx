@@ -26,7 +26,11 @@ Parses a Postman collection (v2.1) into its requests with resolved variables, co
         try
         {
             var json = LoadCollectionJson(specification, path, url, headers);
-            var collection = PostmanParser.Parse(json);
+            // Relative formdata file paths resolve against the collection folder (or the working directory).
+            var baseDirectory = string.IsNullOrWhiteSpace(path)
+                ? Directory.GetCurrentDirectory()
+                : Path.GetDirectoryName(Path.GetFullPath(path));
+            var collection = PostmanParser.Parse(json, baseDirectory);
             return PostmanParser.Render(collection);
         }
         catch (Exception ex)

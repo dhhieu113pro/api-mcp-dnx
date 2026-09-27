@@ -134,6 +134,42 @@ public sealed class PostmanRunnerTests
         Assert.Contains("✓ \"Body has id\" — body contains \"w-1\"", output);
     }
 
+    [Fact]
+    public void Run_FormDataWithFile_IsSentAsMultipartRelativeToBaseDirectory()
+    {
+        var dir = Directory.CreateTempSubdirectory("apimcp-formdata").FullName;
+        File.WriteAllText(Path.Combine(dir, "upload.txt"), "file-content-42");
+        using var server = new MiniHttpServer();
+        var request = new Dictionary<string, object>
+        {
+            ["method"] = "POST",
+            ["url"] = new { raw = "{{base}}files" },
+            ["body"] = new
+            {
+                mode = "formdata",
+                formdata = new object[]
+                {
+                    new { key = "Title", value = "t-{{runId}}", type = "text" },
+                    new { key = "Files", src = "upload.txt", type = "file" },
+                },
+            },
+        };
+        var json = JsonSerializer.Serialize(new
+        {
+            info = new { name = "runner" },
+            variable = new[] { new { key = "base", value = server.Url } },
+            item = new object[] { new Dictionary<string, object> { ["name"] = "Upload", ["request"] = request } },
+        });
+
+        PostmanRunner.Run(PostmanParser.Parse(json, dir), new Dictionary<string, string> { ["runId"] = "7" }, 10, true);
+
+        Assert.Contains("multipart/form-data", server.RequestHeaders);
+        Assert.Contains("name=Title", server.RequestBodyText);
+        Assert.Contains("t-7", server.RequestBodyText);
+        Assert.Contains("filename=upload.txt", server.RequestBodyText);
+        Assert.Contains("file-content-42", server.RequestBodyText);
+    }
+
     private static string StatusTest(int status) =>
         $"pm.test(\"Status code is {status}\", function () {{\n    pm.response.to.have.status({status});\n}});";
 
