@@ -9,7 +9,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server for calling 
 Requires the .NET 10 SDK. Run the latest published package directly from NuGet.org:
 
 ```
-dnx ApiMcp.Dnx@1.3.2 --yes
+dnx ApiMcp.Dnx@1.3.3 --yes
 ```
 
 Configure it in your MCP client:
@@ -19,7 +19,7 @@ Configure it in your MCP client:
   "mcpServers": {
     "api": {
       "command": "dnx",
-      "args": ["ApiMcp.Dnx@1.3.2", "--yes", "--secret-header", "X-Api-Key"],
+      "args": ["ApiMcp.Dnx@1.3.3", "--yes", "--secret-header", "X-Api-Key"],
       "env": {
         "APIMCP_SECRET_X_API_KEY": "your-secret-key"
       }
@@ -31,7 +31,7 @@ Configure it in your MCP client:
 Or with the Claude Code CLI, in one line:
 
 ```
-claude mcp add api --scope user -e APIMCP_SECRET_X_API_KEY=your-secret-key -- dnx ApiMcp.Dnx@1.3.2 --yes --secret-header X-Api-Key
+claude mcp add api --scope user -e APIMCP_SECRET_X_API_KEY=your-secret-key -- dnx ApiMcp.Dnx@1.3.3 --yes --secret-header X-Api-Key
 ```
 
 Configuration is read once at startup: after changing it, restart the MCP server (in Claude Code, start a new session). Call `get_server_status` to check what the running server loaded.
@@ -135,13 +135,13 @@ Sensitive headers are declared server-side with a **name → environment variabl
 The simplest form is `--secret-header NAME` (repeatable). The value is read from `APIMCP_SECRET_<NAME>`, where the name is upper-cased and every non-alphanumeric character becomes `_` (`X-API-KEY` → `APIMCP_SECRET_X_API_KEY`, `Authorization` → `APIMCP_SECRET_AUTHORIZATION`):
 
 ```
-dnx ApiMcp.Dnx@1.3.2 --yes --secret-header X-API-KEY --secret-header Authorization
+dnx ApiMcp.Dnx@1.3.3 --yes --secret-header X-API-KEY --secret-header Authorization
 ```
 
 To choose the environment variable yourself, map it explicitly per-process:
 
 ```
-dnx ApiMcp.Dnx@1.3.2 --yes --header-env "Authorization=MY_API_TOKEN" --header-env "X-Api-Key=MY_API_KEY"
+dnx ApiMcp.Dnx@1.3.3 --yes --header-env "Authorization=MY_API_TOKEN" --header-env "X-Api-Key=MY_API_KEY"
 ```
 
 or via the `APIMCP_HEADER_ENV` environment variable (semicolon-separated):
@@ -159,7 +159,7 @@ Malformed entries (no `=`, or an empty variable name such as `X-API-KEY=`) are i
 By default a secret mapping always wins and the value the caller passes is ignored. For test environments where you want to pass header values directly from the tool parameters, start the server with plain override enabled:
 
 ```
-dnx ApiMcp.Dnx@1.3.2 --yes --allow-plain-headers
+dnx ApiMcp.Dnx@1.3.3 --yes --allow-plain-headers
 # or: --allow-plain (enables both headers and query)
 ```
 
@@ -183,7 +183,7 @@ Behavior when enabled:
 Some APIs expect an API key on the query string (e.g. `?api_key=...`). The same mapping pattern applies to query parameters, so the secret value is also never exposed to the model:
 
 ```
-dnx ApiMcp.Dnx@1.3.2 --yes --query-env "api_key=MY_API_KEY"
+dnx ApiMcp.Dnx@1.3.3 --yes --query-env "api_key=MY_API_KEY"
 ```
 
 or via the `APIMCP_QUERY_ENV` environment variable (semicolon-separated):
@@ -286,14 +286,14 @@ http_request(
 > Tip: because the token is dynamic, it is fine to pass it literally. For a **fixed** secret (e.g. a GitHub PAT), prefer a secret header mapping so the value never reaches the model:
 
 ```
-dnx ApiMcp.Dnx@1.3.2 --yes --header-env "Authorization=MY_GITHUB_PAT"
+dnx ApiMcp.Dnx@1.3.3 --yes --header-env "Authorization=MY_GITHUB_PAT"
 # then call: http_request(method: "GET", url: "https://api.github.com/user", headers: {"Authorization": "ignored"})
 ```
 
 ### Running over `dnx` (no install)
 
 ```
-dnx ApiMcp.Dnx@1.3.2 --yes
+dnx ApiMcp.Dnx@1.3.3 --yes
 ```
 
 ## License
