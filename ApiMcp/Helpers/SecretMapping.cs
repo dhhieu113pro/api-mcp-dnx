@@ -8,21 +8,16 @@ namespace ApiMcp.Helpers;
 // For query parameters:  flag --query-env,   env APIMCP_QUERY_ENV
 internal static class SecretMapping
 {
-    public static IEnumerable<(string Name, string EnvVar)> Load(string[] args, string flagName, string envVarName)
+    // Malformed entries (no '=' or an empty variable name, e.g. "X-API-KEY=") are skipped and,
+    // when 'errors' is given, described there so the server can report them instead of silently
+    // running without the mapping.
+    public static IEnumerable<(string Name, string EnvVar)> Load(string[] args, string flagName, string envVarName, ICollection<string>? errors = null)
     {
         // CLI flag, repeatable; each following arg up to the next "--" is one mapping.
-        for (var i = 0; i < args.Length - 1; i++)
+        foreach (var entry in FlagValues(args, flagName))
         {
-            if (args[i] != flagName)
-                continue;
-            for (var j = i + 1; j < args.Length; j++)
-            {
-                if (args[j].StartsWith("--"))
-                    break;
-                var (name, envVar) = Split(args[j]);
-                if (name is not null)
-                    yield return (name, envVar!);
-            }
+            if (TryParse(entry, flagName, errors, out var mapping))
+                yield return mapping;
         }
 
         // Environment variable, semicolon/newline separated.
@@ -31,11 +26,44 @@ internal static class SecretMapping
         {
             foreach (var entry in fromEnv.Split([';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries))
             {
-                var (name, envVar) = Split(entry);
-                if (name is not null)
-                    yield return (name, envVar!);
+                if (TryParse(entry, envVarName, errors, out var mapping))
+                    yield return mapping;
             }
         }
+    }
+
+    // Values of a repeatable flag: every arg after an occurrence of the flag, up to the next "--" arg.
+    public static IEnumerable<string> FlagValues(string[] args, string flagName)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] != flagName)
+                continue;
+            for (var j = i + 1; j < args.Length; j++)
+            {
+                if (args[j].StartsWith("--"))
+                    break;
+                yield return args[j];
+            }
+        }
+    }
+
+    private static bool TryParse(string entry, string source, ICollection<string>? errors, out (string Name, string EnvVar) mapping)
+    {
+        mapping = default;
+        var (name, envVar) = Split(entry);
+        if (name is null)
+        {
+            errors?.Add($"{source} '{entry}': expected Name=ENV_VAR.");
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(envVar))
+        {
+            errors?.Add($"{source} '{entry}': the environment variable name after '=' is empty.");
+            return false;
+        }
+        mapping = (name, envVar);
+        return true;
     }
 
     // Boolean opt-in flag: `--flag`, `--flag=true|false`, or `--flag <true|false>`.

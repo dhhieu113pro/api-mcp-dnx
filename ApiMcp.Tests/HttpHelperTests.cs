@@ -173,6 +173,7 @@ public sealed class HttpHelperTests
         var result = HttpHelper.Send("POST", server.Url, "{\"X-Empty\":null}", null, "x", null, 10, true);
 
         Assert.Contains("Header 'X-Empty' has no value and no secret mapping is configured for it.", result);
+        Assert.Contains("get_server_status", result);
     }
 
     [Fact]
