@@ -163,6 +163,17 @@ public sealed class PostmanParserTests
         Assert.Empty(PostmanParser.ExtractTests("no pm.test here; let x = 1;"));
     }
 
+    [Theory]
+    [InlineData("pm.test('single', () => pm.response.to.have.status(400));", "single")]
+    [InlineData("pm.test(`backtick`, () => { pm.response.to.have.status(400); });", "backtick")]
+    [InlineData("pm.test(\"double\", () => pm.response.to.have.status(400));", "double")]
+    public void ExtractTests_AcceptsAnyStringQuoteForTheName(string script, string expectedName)
+    {
+        var test = Assert.Single(PostmanParser.ExtractTests(script));
+        Assert.Equal(expectedName, test.Name);
+        Assert.Equal(400, test.ExpectedStatus);
+    }
+
     [Fact]
     public void Render_ListsResolvedRequestsAndAuth()
     {
