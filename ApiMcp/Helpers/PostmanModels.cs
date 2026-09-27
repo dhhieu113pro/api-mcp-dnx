@@ -21,7 +21,9 @@ internal sealed record PostmanItem(
     string? Body,
     string? ContentType,
     List<PostmanTest> Tests,
-    string Script);
+    string Script,
+    // multipart JSON for http requests ({"fields":{...},"files":[{"field","path"}]}) when the body is formdata with files
+    string? Multipart = null);
 
 internal sealed record PostmanTest(string Name, int? ExpectedStatus, List<string> Includes);
 

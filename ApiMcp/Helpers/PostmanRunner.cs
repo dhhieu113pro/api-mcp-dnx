@@ -72,13 +72,14 @@ internal static partial class PostmanRunner
         var authDescription = AuthFor(item, effectiveAuth, variables);
         var headersJson = BuildHeadersJson(headers, item.ContentType);
         var body = item.Body is null ? null : PostmanParser.ResolveVariables(item.Body, variables);
+        var multipart = item.Multipart is null ? null : PostmanParser.ResolveVariables(item.Multipart, variables);
 
         HttpExchange exchange;
         try
         {
             exchange = HttpHelper.Execute(
-                item.Method, url, headersJson, null, body,
-                multipartJson: null, timeoutSeconds, followRedirects);
+                item.Method, url, headersJson, null, multipart is null ? body : null,
+                multipartJson: multipart, timeoutSeconds, followRedirects);
         }
         catch (Exception ex)
         {

@@ -9,7 +9,7 @@ internal static partial class PostmanParser
     [GeneratedRegex(@"\{\{([^}]+)\}\}")]
     private static partial Regex VariableToken();
 
-    public static PostmanCollection Parse(string json)
+    public static PostmanCollection Parse(string json, string? baseDirectory = null)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -32,7 +32,7 @@ internal static partial class PostmanParser
         var items = new List<PostmanItem>();
         if (Get(root, "item") is { ValueKind: JsonValueKind.Array } itemArray)
             foreach (var node in itemArray.EnumerateArray())
-                CollectItems(node, "", items);
+                CollectItems(node, "", items, baseDirectory);
 
         return new PostmanCollection(name, schema, variables, ParseAuth(Get(root, "auth")), items);
     }
@@ -130,22 +130,22 @@ internal static partial class PostmanParser
             p.TryGetValue(name, out var v) && v.Length > 0 ? v : "<missing>";
     }
 
-    private static void CollectItems(JsonElement node, string folder, List<PostmanItem> items)
+    private static void CollectItems(JsonElement node, string folder, List<PostmanItem> items, string? baseDirectory)
     {
         var name = GetString(node, "name") ?? "";
         if (Get(node, "request") is { ValueKind: JsonValueKind.Object } request)
         {
-            items.Add(ParseItem(node, name, folder, request));
+            items.Add(ParseItem(node, name, folder, request, baseDirectory));
             return;
         }
 
         var childFolder = name.Length == 0 ? folder : (folder.Length == 0 ? name : $"{folder} / {name}");
         if (Get(node, "item") is { ValueKind: JsonValueKind.Array } children)
             foreach (var child in children.EnumerateArray())
-                CollectItems(child, childFolder, items);
+                CollectItems(child, childFolder, items, baseDirectory);
     }
 
-    private static PostmanItem ParseItem(JsonElement node, string name, string folder, JsonElement request)
+    private static PostmanItem ParseItem(JsonElement node, string name, string folder, JsonElement request, string? baseDirectory)
     {
         var rawMethod = GetString(request, "method");
         var method = string.IsNullOrWhiteSpace(rawMethod) ? "GET" : rawMethod.Trim().ToUpperInvariant();
@@ -164,10 +164,11 @@ internal static partial class PostmanParser
 
         var auth = ParseAuth(Get(request, "auth"));
         var (body, contentType) = ParseBody(request);
+        var multipart = ParseMultipart(request, baseDirectory);
         var script = CollectTestScript(node);
         var tests = ExtractTests(script);
 
-        return new PostmanItem(folder, name, method, url, headers, auth, body, contentType, tests, script);
+        return new PostmanItem(folder, name, method, url, headers, auth, body, contentType, tests, script, multipart);
     }
 
     private static string GetUrl(JsonElement request)
@@ -260,6 +261,50 @@ internal static partial class PostmanParser
             _ => (null, null),
         };
     }
+
+    // formdata with at least one file entry becomes a multipart request; relative src paths resolve
+    // against baseDirectory (the collection file folder), like Newman's --working-dir.
+    private static string? ParseMultipart(JsonElement request, string? baseDirectory)
+    {
+        if (Get(request, "body") is not { ValueKind: JsonValueKind.Object } body
+            || GetString(body, "mode") != "formdata"
+            || Get(body, "formdata") is not { ValueKind: JsonValueKind.Array } entries)
+            return null;
+
+        var fields = new Dictionary<string, string>(StringComparer.Ordinal);
+        var files = new List<Dictionary<string, string>>();
+        foreach (var entry in entries.EnumerateArray())
+        {
+            var key = GetString(entry, "key");
+            if (string.IsNullOrEmpty(key) || GetBool(entry, "disabled"))
+                continue;
+            if (GetString(entry, "type") != "file")
+            {
+                fields[key] = GetString(entry, "value") ?? "";
+                continue;
+            }
+
+            var sources = Get(entry, "src") switch
+            {
+                { ValueKind: JsonValueKind.String } s => [s.GetString() ?? ""],
+                { ValueKind: JsonValueKind.Array } a => a.EnumerateArray().Select(x => x.GetString() ?? "").ToList(),
+                _ => new List<string>(),
+            };
+            foreach (var src in sources.Where(s => s.Length > 0))
+            {
+                var path = Path.IsPathRooted(src) || baseDirectory is null ? src : Path.Combine(baseDirectory, src);
+                var file = new Dictionary<string, string> { ["field"] = key, ["path"] = path };
+                if (GetString(entry, "contentType") is { Length: > 0 } fileContentType)
+                    file["contentType"] = fileContentType;
+                files.Add(file);
+            }
+        }
+
+        return files.Count == 0 ? null : JsonSerializer.Serialize(new { fields, files });
+    }
+
+    private static bool GetBool(JsonElement element, string name) =>
+        Get(element, name) is { ValueKind: JsonValueKind.True };
 
     private static string? JoinKeyValues(JsonElement? entries)
     {
