@@ -90,6 +90,43 @@ public sealed class HttpToolTests : IDisposable
     }
 
     [Fact]
+    public void GetServerStatus_ShowsVersionMappingsAndPresence()
+    {
+        Environment.SetEnvironmentVariable(HeaderTokenEnv, "distinct-secret-value");
+        HeaderStore.AddMapping("X-API-KEY", HeaderTokenEnv);
+        var tool = new HttpTool();
+
+        var result = tool.GetServerStatus();
+
+        Assert.Contains("ApiMcp ", result);
+        Assert.Contains($"X-API-KEY -> env[{HeaderTokenEnv}]: value present", result);
+        Assert.DoesNotContain("distinct-secret-value", result);
+    }
+
+    [Fact]
+    public void GetServerStatus_ShowsConfigErrors()
+    {
+        HeaderStore.LoadFromArgsAndEnv(["--header-env", "X-API-KEY="]);
+        var tool = new HttpTool();
+
+        var result = tool.GetServerStatus();
+
+        Assert.Contains("Configuration problems", result);
+        Assert.Contains("X-API-KEY=", result);
+    }
+
+    [Fact]
+    public void GetServerStatus_NoMappings_ExplainsHowToConfigure()
+    {
+        var tool = new HttpTool();
+
+        var result = tool.GetServerStatus();
+
+        Assert.Contains("--secret-header", result);
+        Assert.Contains("restart", result);
+    }
+
+    [Fact]
     public void ListSecretHeaders_NoMappings_ReturnsHint()
     {
         HeaderStore.Clear();

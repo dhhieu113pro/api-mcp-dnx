@@ -172,7 +172,9 @@ internal static class HttpHelper
                 if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.Null)
                 {
                     if (!HeaderStore.IsSecret(prop.Name))
-                        throw new InvalidOperationException($"Header '{prop.Name}' has no value and no secret mapping is configured for it.");
+                        throw new InvalidOperationException(
+                            $"Header '{prop.Name}' has no value and no secret mapping is configured for it. " +
+                            "Call get_server_status to see what this server process loaded; configuration changes only apply after the MCP server restarts.");
                     if (!HeaderStore.AllowPlain)
                         continue;
                     // In allow-plain mode, explicit null means "inject the secret".
