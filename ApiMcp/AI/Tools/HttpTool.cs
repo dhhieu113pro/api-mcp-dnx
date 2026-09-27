@@ -1,6 +1,7 @@
 using ApiMcp.Helpers;
 using ModelContextProtocol.Server;
 using System.ComponentModel;
+using System.Reflection;
 using System.Text.Json;
 
 namespace ApiMcp.AI.Tools;
@@ -50,6 +51,40 @@ public class HttpTool
             return "No secret headers configured. Start the server with --header-env Name=ENV_VAR (or set APIMCP_HEADER_ENV) and restart.";
         var suffix = HeaderStore.AllowPlain ? "\n(plain override allowed: a non-empty value you pass is sent as-is; null injects the secret)" : "";
         return "Secret headers (values are server-side, never shown):\n" + string.Join("\n", names.Select(n => $" - {n}")) + suffix;
+    }
+
+    [McpServerTool, Description("""
+ Reports how this running server process is configured: its version, each secret header and query parameter with the environment variable it reads and whether that variable has a value (values are never shown), whether plain override is allowed, and any malformed configuration entries. Call this first when a secret header is not being applied or requests come back 401/403.
+ """)]
+    public string GetServerStatus()
+    {
+        var version = typeof(HttpTool).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "unknown";
+        var lines = new List<string> { $"ApiMcp {version}", "" };
+
+        var headers = HeaderStore.Status();
+        if (headers.Count == 0)
+        {
+            lines.Add("Secret headers: none. Start the server with --secret-header NAME (value read from env APIMCP_SECRET_<NAME>, e.g. X-API-KEY -> APIMCP_SECRET_X_API_KEY) or --header-env NAME=ENV_VAR, then restart the MCP server.");
+        }
+        else
+        {
+            lines.Add("Secret headers:");
+            lines.AddRange(headers.Select(s => $" - {s}"));
+        }
+        lines.Add($"Plain header override (--allow-plain-headers): {(HeaderStore.AllowPlain ? "on" : "off")}");
+
+        var queryNames = QueryParamStore.SecretNames();
+        lines.Add(queryNames.Count == 0
+            ? "Secret query parameters: none"
+            : "Secret query parameters: " + string.Join(", ", queryNames.Select(n => $"{n} -> env[{QueryParamStore.SecretMappings[n]}]")));
+
+        if (HeaderStore.ConfigErrors.Count > 0)
+        {
+            lines.Add("");
+            lines.Add("Configuration problems (these entries were ignored):");
+            lines.AddRange(HeaderStore.ConfigErrors.Select(e => $" - {e}"));
+        }
+        return string.Join("\n", lines);
     }
 
     [McpServerTool, Description("""

@@ -18,9 +18,13 @@ internal static class HeaderStore
     // When true, a non-empty caller-supplied value overrides the secret mapping.
     public static bool AllowPlain { get; private set; }
 
+    // Malformed mapping entries found while loading, e.g. "X-API-KEY=" with no variable name.
+    public static List<string> ConfigErrors { get; } = [];
+
     internal static void Clear()
     {
         SecretMappings.Clear();
+        ConfigErrors.Clear();
         AllowPlain = false;
     }
 
@@ -32,8 +36,11 @@ internal static class HeaderStore
 
     public static void LoadFromArgsAndEnv(string[] args)
     {
-        foreach (var (name, envVar) in SecretMapping.Load(args, "--header-env", "APIMCP_HEADER_ENV"))
+        foreach (var (name, envVar) in SecretMapping.Load(args, "--header-env", "APIMCP_HEADER_ENV", ConfigErrors))
             AddMapping(name, envVar);
+        // --secret-header NAME reads the value from APIMCP_SECRET_<NAME>, so no Name=ENV_VAR pair is needed.
+        foreach (var name in SecretMapping.FlagValues(args, "--secret-header"))
+            AddMapping(name, ConventionalEnvVar(name));
         AllowPlain = SecretMapping.LoadBoolFlag(args, "--allow-plain-headers", "APIMCP_ALLOW_PLAIN_HEADERS")
             || SecretMapping.LoadBoolFlag(args, "--allow-plain", "APIMCP_ALLOW_PLAIN");
     }
@@ -62,4 +69,15 @@ internal static class HeaderStore
 
     public static IReadOnlyList<string> SecretNames() =>
         SecretMappings.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+
+    // Environment variable used by --secret-header: "X-API-KEY" -> "APIMCP_SECRET_X_API_KEY".
+    public static string ConventionalEnvVar(string headerName) =>
+        "APIMCP_SECRET_" + new string(headerName.Trim().ToUpperInvariant().Select(c => char.IsAsciiLetterOrDigit(c) ? c : '_').ToArray());
+
+    // One line per mapping saying whether its environment variable has a value. Never includes the value.
+    public static IReadOnlyList<string> Status() =>
+        SecretNames()
+            .Select(n => $"{n} -> env[{SecretMappings[n]}]: " +
+                         (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(SecretMappings[n])) ? "NOT SET" : "value present"))
+            .ToList();
 }

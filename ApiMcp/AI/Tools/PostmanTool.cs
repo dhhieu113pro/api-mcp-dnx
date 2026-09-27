@@ -36,7 +36,9 @@ Parses a Postman collection (v2.1) into its requests with resolved variables, co
     }
 
     [McpServerTool, Description("""
-Runs every request in a Postman collection (v2.1) against the live servers and evaluates the embedded pm.test assertions (expected status codes such as pm.response.to.have.status(200), and body-include checks such as pm.expect(pm.response.text()).to.include(...)). The common API-key/bearer/basic auth types are applied automatically and collection {{variables}} are resolved.
+Runs every request in a Postman collection (v2.1) against the live servers and evaluates the embedded pm.test assertions (expected status codes such as pm.response.to.have.status(200), and body-include checks such as pm.expect(pm.response.text()).to.include(...)). The common API-key/bearer/basic auth types are applied automatically and collection {{variables}} are resolved in the URL, headers and body.
+
+Requests run in order. After each response, pm.collectionVariables/environment/variables/globals.set("name", <value>) calls are applied so later requests can use {{name}}; <value> may be a string literal, a pm.response.json() path (e.g. pm.response.json().data[0].id) or a let alias of one. Other JavaScript is not executed. A request with no recognized pm.test assertion is reported as [NOTEST] and is not counted as passed.
 
 - 'specification': the raw collection JSON text. 'path': a local file path. 'url': a URL to download from. Provide exactly one.
 - 'headers': optional JSON object for fetching a protected 'url'.

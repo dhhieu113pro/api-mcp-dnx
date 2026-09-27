@@ -12,6 +12,15 @@ internal static partial class PostmanRunner
     [GeneratedRegex(@"let\s+([A-Za-z_]\w*)\s*=\s*([^;]+);\s*", RegexOptions.Compiled)]
     private static partial Regex LetDefinitionRegex();
 
+    // pm.collectionVariables.set("name", <expr>) and the environment/variables/globals variants.
+    [GeneratedRegex(@"pm\.(?:collectionVariables|environment|variables|globals)\.set\(\s*([""'`])([^""'`]+)\1\s*,\s*([^;\n]+?)\s*\)\s*(?:;|$)", RegexOptions.Multiline)]
+    private static partial Regex VariableSetRegex();
+
+    [GeneratedRegex(@"token|secret|password|key", RegexOptions.IgnoreCase)]
+    private static partial Regex SecretNameRegex();
+
+    private const string NoTestLabel = "[NOTEST]";
+
     public static string Run(
         PostmanCollection collection,
         IReadOnlyDictionary<string, string>? variableOverrides,
@@ -26,20 +35,24 @@ internal static partial class PostmanRunner
         var total = StopwatchStart();
         var blocks = new List<string>();
         int passed = 0;
+        int noTest = 0;
         foreach (var item in collection.Items)
         {
             var block = RunItem(item, collection, variables, timeoutSeconds, followRedirects);
             if (block.StartsWith("[PASS]", StringComparison.Ordinal))
                 passed++;
+            else if (block.StartsWith(NoTestLabel, StringComparison.Ordinal))
+                noTest++;
             blocks.Add(block);
         }
         var elapsed = StopwatchStop(total);
-        var failed = collection.Items.Count - passed;
+        var failed = collection.Items.Count - passed - noTest;
+        var noTestText = noTest == 0 ? "" : $", {noTest} without assertions";
 
         var summary = new StringBuilder();
         summary.AppendLine(
             $"Postman collection: {collection.Name} ({collection.Items.Count} requests) — " +
-            $"{passed} passed, {failed} failed, {elapsed:0.###}s");
+            $"{passed} passed, {failed} failed{noTestText}, {elapsed:0.###}s");
         foreach (var block in blocks)
             summary.AppendLine(block);
         return summary.ToString();
@@ -48,7 +61,7 @@ internal static partial class PostmanRunner
     private static string RunItem(
         PostmanItem item,
         PostmanCollection collection,
-        IReadOnlyDictionary<string, string> variables,
+        Dictionary<string, string> variables,
         int timeoutSeconds,
         bool followRedirects)
     {
@@ -58,12 +71,13 @@ internal static partial class PostmanRunner
         var headers = BuildEffectiveHeaders(item, effectiveAuth, variables);
         var authDescription = AuthFor(item, effectiveAuth, variables);
         var headersJson = BuildHeadersJson(headers, item.ContentType);
+        var body = item.Body is null ? null : PostmanParser.ResolveVariables(item.Body, variables);
 
         HttpExchange exchange;
         try
         {
             exchange = HttpHelper.Execute(
-                item.Method, url, headersJson, null, item.Body,
+                item.Method, url, headersJson, null, body,
                 multipartJson: null, timeoutSeconds, followRedirects);
         }
         catch (Exception ex)
@@ -74,12 +88,12 @@ internal static partial class PostmanRunner
             return sb.ToString();
         }
 
-        var passed = EvaluateTests(
-            item, exchange,
-            out var testLines);
+        var lets = ParseLets(item.Script);
+        var passed = EvaluateTests(item, exchange, lets, out var testLines);
+        testLines.AddRange(ApplyVariableSets(item.Script, exchange, lets, variables));
 
-        var label = passed ? "PASS" : "FAIL";
-        sb.AppendLine($"[{label}] {item.Name} ({exchange.ElapsedMs}ms)");
+        var label = item.Tests.Count == 0 ? NoTestLabel : passed ? "[PASS]" : "[FAIL]";
+        sb.AppendLine($"{label} {item.Name} ({exchange.ElapsedMs}ms)");
         sb.AppendLine($"  {item.Method} {url}");
         if (authDescription is not null)
             sb.AppendLine($"  {authDescription}");
@@ -89,20 +103,52 @@ internal static partial class PostmanRunner
         return sb.ToString();
     }
 
-    private static bool EvaluateTests(
-        PostmanItem item,
-        HttpExchange exchange,
-        out List<string> testLines)
+    private static Dictionary<string, string> ParseLets(string script)
     {
         var lets = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (Match m in LetDefinition.Matches(item.Script))
+        foreach (Match m in LetDefinition.Matches(script))
         {
             var name = m.Groups[1].Value;
             var definition = m.Groups[2].Value.Trim();
             if (definition.Length > 0)
                 lets[name] = definition;
         }
+        return lets;
+    }
 
+    // Applies pm.*.set(...) calls in script order so later requests see the values.
+    // Only literals and response-JSON paths (directly or via a let alias) are supported.
+    private static List<string> ApplyVariableSets(
+        string script,
+        HttpExchange exchange,
+        IReadOnlyDictionary<string, string> lets,
+        Dictionary<string, string> variables)
+    {
+        var lines = new List<string>();
+        foreach (Match m in VariableSetRegex().Matches(script))
+        {
+            var name = m.Groups[2].Value;
+            var expression = m.Groups[3].Value;
+            var value = ResolveIncludeValue(exchange.Body, expression, lets);
+            if (value is null)
+            {
+                lines.Add($"→ could not resolve value for {name} ({expression}); left unchanged");
+                continue;
+            }
+
+            variables[name] = value;
+            var shown = SecretNameRegex().IsMatch(name) ? "<redacted>" : value;
+            lines.Add($"→ set {name} = {shown}");
+        }
+        return lines;
+    }
+
+    private static bool EvaluateTests(
+        PostmanItem item,
+        HttpExchange exchange,
+        IReadOnlyDictionary<string, string> lets,
+        out List<string> testLines)
+    {
         testLines = new List<string>();
         bool allPassed = true;
         foreach (var test in item.Tests)
@@ -229,20 +275,29 @@ internal static partial class PostmanRunner
         if (string.IsNullOrEmpty(path))
             return null;
 
-        JsonElement? current;
+        JsonDocument doc;
         try
         {
-            using var doc = JsonDocument.Parse(body);
-            current = doc.RootElement;
-            if (current.Value.ValueKind != JsonValueKind.Object &&
-                current.Value.ValueKind != JsonValueKind.Array)
-                return null;
+            doc = JsonDocument.Parse(body);
         }
         catch (JsonException)
         {
             return null;
         }
 
+        using (doc)
+        {
+            // Clone so the result stays valid after the document is disposed.
+            return WalkFromRoot(doc.RootElement, path)?.Clone();
+        }
+    }
+
+    private static JsonElement? WalkFromRoot(JsonElement root, string path)
+    {
+        if (root.ValueKind != JsonValueKind.Object && root.ValueKind != JsonValueKind.Array)
+            return null;
+
+        JsonElement? current = root;
         int index = 0;
         while (index < path.Length)
         {

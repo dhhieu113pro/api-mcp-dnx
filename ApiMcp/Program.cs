@@ -16,8 +16,10 @@ if (HeaderStore.SecretMappings.Count > 0)
 }
 else
 {
-    Console.Error.WriteLine("[apimcp] no secret headers configured. Use --header-env Name=ENV_VAR or APIMCP_HEADER_ENV.");
+    Console.Error.WriteLine("[apimcp] no secret headers configured. Use --secret-header NAME (env APIMCP_SECRET_<NAME>), --header-env Name=ENV_VAR or APIMCP_HEADER_ENV.");
 }
+foreach (var error in HeaderStore.ConfigErrors)
+    Console.Error.WriteLine($"[apimcp] WARNING ignored secret header entry: {error}");
 if (HeaderStore.AllowPlain)
     Console.Error.WriteLine("[apimcp] plain header override allowed (--allow-plain-headers). Non-empty caller values are sent as-is; null injects the secret.");
 
