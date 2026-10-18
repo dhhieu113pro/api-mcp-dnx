@@ -97,36 +97,6 @@ public sealed class HttpHelperTests
     }
 
     [Fact]
-    public async Task SecretQueryParam_IsInjectedOverTheWire()
-    {
-        const string tokenEnv = "APIMCP_HTTPTEST_QUERY_TOKEN";
-        var original = Environment.GetEnvironmentVariable(tokenEnv);
-        try
-        {
-            Environment.SetEnvironmentVariable(tokenEnv, "wire secret+/");
-            QueryParamStore.AddMapping("api_key", tokenEnv);
-
-            using var server = new MiniHttpServer("ok");
-            HttpHelper.Send("GET", server.Url, null, "api_key=__IGNORED__&page=1", null, null, 10, true);
-
-            var requestLine = server.RequestLine;
-            for (var i = 0; i < 50 && requestLine is null; i++)
-            {
-                await Task.Delay(50);
-                requestLine = server.RequestLine;
-            }
-
-            Assert.Contains("api_key=wire%20secret%2B%2F&page=1", requestLine ?? "");
-            Assert.DoesNotContain("__IGNORED__", requestLine ?? "");
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(tokenEnv, original);
-            QueryParamStore.Clear();
-        }
-    }
-
-    [Fact]
     public void BodyAndHeaders_AreSentOverTheWire()
     {
         using var server = new MiniHttpServer("ok");
@@ -173,7 +143,7 @@ public sealed class HttpHelperTests
         var result = HttpHelper.Send("POST", server.Url, "{\"X-Empty\":null}", null, "x", null, 10, true);
 
         Assert.Contains("Header 'X-Empty' has no value and no secret mapping is configured for it.", result);
-        Assert.Contains("get_server_status", result);
+        Assert.Contains("restarts", result);
     }
 
     [Fact]
@@ -240,6 +210,43 @@ public sealed class HttpHelperTests
         HttpHelper.Send("GET", server.Url, "{\"X-Skip\":\"\"}", null, null, null, 10, true);
 
         Assert.DoesNotContain("X-Skip", server.RequestHeaders ?? "");
+    }
+
+    [Fact]
+    public void Headers_EnvReference_IsResolvedFromEnvironment()
+    {
+        const string envVar = "APIMCP_HTTPTEST_DYNAMIC";
+        var original = Environment.GetEnvironmentVariable(envVar);
+        try
+        {
+            Environment.SetEnvironmentVariable(envVar, "dynamic-secret");
+            HeaderStore.Clear();
+
+            using var server = new MiniHttpServer("ok");
+            HttpHelper.Send("GET", server.Url, "{\"X-Dynamic\":\"${" + envVar + "}\"}", null, null, null, 10, true);
+
+            Assert.Contains("X-Dynamic: dynamic-secret", server.RequestHeaders ?? "");
+            Assert.DoesNotContain(envVar, server.RequestHeaders ?? "");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envVar, original);
+            HeaderStore.Clear();
+        }
+    }
+
+    [Fact]
+    public void Headers_EnvReferenceMissingEnv_ReturnsError()
+    {
+        const string envVar = "APIMCP_HTTPTEST_DYNAMIC_MISSING";
+        Environment.SetEnvironmentVariable(envVar, null);
+        HeaderStore.Clear();
+
+        using var server = new MiniHttpServer("ok");
+        var result = HttpHelper.Send("GET", server.Url, "{\"X-Dynamic\":\"${" + envVar + "}\"}", null, null, null, 10, true);
+
+        Assert.Contains(envVar, result);
+        Assert.Contains("not set", result);
     }
 
     [Fact]

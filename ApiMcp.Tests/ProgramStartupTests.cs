@@ -14,8 +14,7 @@ public sealed class ProgramStartupTests : IDisposable
     public ProgramStartupTests()
     {
         HeaderStore.Clear();
-        QueryParamStore.Clear();
-        foreach (var name in new[] { "APIMCP_HEADER_ENV", "APIMCP_QUERY_ENV", "APIMCP_FILE_ROOTS" })
+        foreach (var name in new[] { "AUTHORIZATION", "APIMCP_FILE_ROOTS" })
         {
             _originalEnv[name] = Environment.GetEnvironmentVariable(name);
             Environment.SetEnvironmentVariable(name, null);
@@ -31,7 +30,6 @@ public sealed class ProgramStartupTests : IDisposable
             Environment.SetEnvironmentVariable(pair.Key, pair.Value);
         FileAccessPolicy.LoadFromEnv();
         HeaderStore.Clear();
-        QueryParamStore.Clear();
     }
 
     [Fact]
@@ -40,7 +38,6 @@ public sealed class ProgramStartupTests : IDisposable
         var (exitLog, writer) = await RunMainAsync();
 
         Assert.Contains("[apimcp] no secret headers configured.", exitLog);
-        Assert.Contains("[apimcp] no secret query parameters configured.", exitLog);
         Assert.Contains("[apimcp] multipart file access unrestricted.", exitLog);
         Assert.NotEqual("", writer.ToString());
     }
@@ -49,21 +46,17 @@ public sealed class ProgramStartupTests : IDisposable
     public async Task Startup_WithConfiguration_LogsMaskedMappings()
     {
         using var roots = new TempDir();
-        Environment.SetEnvironmentVariable("APIMCP_HEADER_ENV", $"Authorization=APIMCP_STARTUP_HEADER");
-        Environment.SetEnvironmentVariable("APIMCP_QUERY_ENV", $"api_key=APIMCP_STARTUP_QUERY");
+        Environment.SetEnvironmentVariable("AUTHORIZATION", "h");
         Environment.SetEnvironmentVariable("APIMCP_FILE_ROOTS", roots.Path);
-        Environment.SetEnvironmentVariable("APIMCP_STARTUP_HEADER", "h");
-        Environment.SetEnvironmentVariable("APIMCP_STARTUP_QUERY", "q");
 
-        var (exitLog, writer) = await RunMainAsync();
+        var (exitLog, writer) = await RunMainAsync(["--header", "Authorization"]);
 
-        Assert.Contains("[apimcp] secret headers: Authorization -> env[APIMCP_STARTUP_HEADER]", exitLog);
-        Assert.Contains("[apimcp] secret query parameters: api_key -> env[APIMCP_STARTUP_QUERY]", exitLog);
+        Assert.Contains("[apimcp] secret headers: Authorization -> env[AUTHORIZATION]", exitLog);
         Assert.Contains("[apimcp] multipart file roots: ", exitLog);
         Assert.NotEqual("", writer.ToString());
     }
 
-    private static async Task<(string stderr, System.IO.StringWriter writer)> RunMainAsync()
+    private static async Task<(string stderr, System.IO.StringWriter writer)> RunMainAsync(string[]? args = null)
     {
         var assembly = typeof(HeaderStore).Assembly;
         var programType = assembly.GetType("Program", throwOnError: false)
@@ -77,7 +70,7 @@ public sealed class ProgramStartupTests : IDisposable
         Console.SetIn(new StringReader(""));
         Environment.SetEnvironmentVariable("DOTNET_NOLOGO", "1");
 
-        var task = (Task)main.Invoke(null, new object?[] { Array.Empty<string>() })!;
+        var task = (Task)main.Invoke(null, new object?[] { args ?? [] })!;
         var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(20)));
 
         Assert.Same(task, completed);

@@ -8,14 +8,12 @@ namespace ApiMcp.Tests;
 public sealed class HttpToolTests : IDisposable
 {
     private const string HeaderTokenEnv = "APIMCP_TOOLTEST_AUTH";
-    private const string QueryTokenEnv = "APIMCP_TOOLTEST_QUERY";
     private readonly Dictionary<string, string?> _originalEnv = new();
 
     public HttpToolTests()
     {
         HeaderStore.Clear();
-        QueryParamStore.Clear();
-        foreach (var name in new[] { HeaderTokenEnv, QueryTokenEnv })
+        foreach (var name in new[] { HeaderTokenEnv })
         {
             _originalEnv[name] = Environment.GetEnvironmentVariable(name);
             Environment.SetEnvironmentVariable(name, null);
@@ -25,7 +23,6 @@ public sealed class HttpToolTests : IDisposable
     public void Dispose()
     {
         HeaderStore.Clear();
-        QueryParamStore.Clear();
         foreach (var pair in _originalEnv)
             Environment.SetEnvironmentVariable(pair.Key, pair.Value);
     }
@@ -87,93 +84,5 @@ public sealed class HttpToolTests : IDisposable
         var result = tool.HttpRequest("GET", "not-a-url");
 
         Assert.Contains("not a valid absolute URL", result);
-    }
-
-    [Fact]
-    public void GetServerStatus_ShowsVersionMappingsAndPresence()
-    {
-        Environment.SetEnvironmentVariable(HeaderTokenEnv, "distinct-secret-value");
-        HeaderStore.AddMapping("X-API-KEY", HeaderTokenEnv);
-        var tool = new HttpTool();
-
-        var result = tool.GetServerStatus();
-
-        Assert.Contains("ApiMcp ", result);
-        Assert.Contains($"X-API-KEY -> env[{HeaderTokenEnv}]: value present", result);
-        Assert.DoesNotContain("distinct-secret-value", result);
-    }
-
-    [Fact]
-    public void GetServerStatus_ShowsConfigErrors()
-    {
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", "X-API-KEY="]);
-        var tool = new HttpTool();
-
-        var result = tool.GetServerStatus();
-
-        Assert.Contains("Configuration problems", result);
-        Assert.Contains("X-API-KEY=", result);
-    }
-
-    [Fact]
-    public void GetServerStatus_NoMappings_ExplainsHowToConfigure()
-    {
-        var tool = new HttpTool();
-
-        var result = tool.GetServerStatus();
-
-        Assert.Contains("--secret-header", result);
-        Assert.Contains("restart", result);
-    }
-
-    [Fact]
-    public void ListSecretHeaders_NoMappings_ReturnsHint()
-    {
-        HeaderStore.Clear();
-        var tool = new HttpTool();
-
-        var result = tool.ListSecretHeaders();
-
-        Assert.Contains("No secret headers configured", result);
-    }
-
-    [Fact]
-    public void ListSecretHeaders_WithMappings_ListsNames()
-    {
-        Environment.SetEnvironmentVariable(HeaderTokenEnv, "distinct-secret-value");
-        HeaderStore.Clear();
-        HeaderStore.AddMapping("Authorization", HeaderTokenEnv);
-        HeaderStore.AddMapping("X-Api-Key", HeaderTokenEnv);
-        var tool = new HttpTool();
-
-        var result = tool.ListSecretHeaders();
-
-        Assert.Contains("Authorization", result);
-        Assert.Contains("X-Api-Key", result);
-        Assert.DoesNotContain("distinct-secret-value", result);
-    }
-
-    [Fact]
-    public void ListSecretQueryParams_NoMappings_ReturnsHint()
-    {
-        QueryParamStore.Clear();
-        var tool = new HttpTool();
-
-        var result = tool.ListSecretQueryParams();
-
-        Assert.Contains("No secret query parameters configured", result);
-    }
-
-    [Fact]
-    public void ListSecretQueryParams_WithMappings_ListsNames()
-    {
-        Environment.SetEnvironmentVariable(QueryTokenEnv, "v");
-        QueryParamStore.Clear();
-        QueryParamStore.AddMapping("api_key", QueryTokenEnv);
-        var tool = new HttpTool();
-
-        var result = tool.ListSecretQueryParams();
-
-        Assert.Contains("api_key", result);
     }
 }

@@ -1,32 +1,18 @@
+using System.Text.RegularExpressions;
+
 namespace ApiMcp.Helpers;
 
 // Server-owned registry of secret header mappings.
 // Each mapping says: when the tool receives a header named <Name>, read its
-// value from the process environment variable <EnvVar> instead of trusting the
-// LLM-supplied value. Secrets never appear in tool params, logs, or prompts.
-//
-// For test environments, pass --allow-plain-headers (or set
-// APIMCP_ALLOW_PLAIN_HEADERS=true / APIMCP_ALLOW_PLAIN=true) to let a
-// caller-supplied non-empty header value win over the secret. To still use the
-// secret in that mode, pass null for the header value (or omit empty handling:
-// an empty value falls back to the secret).
+// value from the process environment variable named after it instead of
+// trusting the LLM-supplied value. Secrets never appear in tool params, logs,
+// or prompts.
 internal static class HeaderStore
 {
     // Logical header name -> environment variable that holds the secret value.
     public static Dictionary<string, string> SecretMappings { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    // When true, a non-empty caller-supplied value overrides the secret mapping.
-    public static bool AllowPlain { get; private set; }
-
-    // Malformed mapping entries found while loading, e.g. "X-API-KEY=" with no variable name.
-    public static List<string> ConfigErrors { get; } = [];
-
-    internal static void Clear()
-    {
-        SecretMappings.Clear();
-        ConfigErrors.Clear();
-        AllowPlain = false;
-    }
+    internal static void Clear() => SecretMappings.Clear();
 
     public static void AddMapping(string name, string envVar)
     {
@@ -34,50 +20,55 @@ internal static class HeaderStore
             SecretMappings[name.Trim()] = envVar.Trim();
     }
 
-    public static void LoadFromArgsAndEnv(string[] args)
+    // --header NAME (repeatable) reads the value from the environment variable named after the header.
+    public static void LoadFromArgs(string[] args)
     {
-        foreach (var (name, envVar) in SecretMapping.Load(args, "--header-env", "APIMCP_HEADER_ENV", ConfigErrors))
-            AddMapping(name, envVar);
-        // --secret-header NAME reads the value from APIMCP_SECRET_<NAME>, so no Name=ENV_VAR pair is needed.
-        foreach (var name in SecretMapping.FlagValues(args, "--secret-header"))
-            AddMapping(name, ConventionalEnvVar(name));
-        AllowPlain = SecretMapping.LoadBoolFlag(args, "--allow-plain-headers", "APIMCP_ALLOW_PLAIN_HEADERS")
-            || SecretMapping.LoadBoolFlag(args, "--allow-plain", "APIMCP_ALLOW_PLAIN");
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] != "--header")
+                continue;
+            for (var j = i + 1; j < args.Length && !args[j].StartsWith("--"); j++)
+                AddMapping(args[j], ConventionalEnvVar(args[j]));
+        }
     }
 
     // True when the given header name is owned by the server.
     public static bool IsSecret(string name) => SecretMappings.ContainsKey(name);
 
-    // Resolves the value for a request header. By default secret headers always
-    // win over anything the LLM supplied; a missing env var surfaces as a clear
-    // error. When AllowPlain is on, a non-empty caller value is used as-is (no
-    // env lookup), while a null/empty/whitespace value still resolves the secret.
+    // Resolves the value for a request header.
+    //  - A header declared with --header always wins; its value is read from the
+    //    environment variable named after it, and a missing env var is an error.
+    //  - Otherwise, every "${NAME}" in the caller value is replaced by the value
+    //    of the environment variable NAME; a missing one is an error.
+    //  - Anything else is passed through literally.
     public static string? Resolve(string name, string? llmValue)
     {
         if (SecretMappings.TryGetValue(name, out var envVar))
         {
-            if (AllowPlain && !string.IsNullOrWhiteSpace(llmValue))
-                return llmValue;
             var secret = Environment.GetEnvironmentVariable(envVar);
             if (string.IsNullOrEmpty(secret))
                 throw new InvalidOperationException(
                     $"Secret header '{name}' is configured to read environment variable '{envVar}', but '{envVar}' is not set or is empty.");
             return secret;
         }
-        return llmValue;
+
+        if (llmValue is null)
+            return null;
+
+        return EnvReference.Replace(llmValue, match =>
+        {
+            var refVar = match.Groups[1].Value;
+            var value = Environment.GetEnvironmentVariable(refVar);
+            if (string.IsNullOrEmpty(value))
+                throw new InvalidOperationException(
+                    $"Header '{name}' value '{llmValue}' references environment variable '{refVar}', but it is not set or is empty.");
+            return value;
+        });
     }
 
-    public static IReadOnlyList<string> SecretNames() =>
-        SecretMappings.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+    private static readonly Regex EnvReference = new(@"\$\{([^}]+)\}", RegexOptions.Compiled);
 
-    // Environment variable used by --secret-header: "X-API-KEY" -> "APIMCP_SECRET_X_API_KEY".
+    // Environment variable used by --header: "X-API-KEY" -> "X_API_KEY".
     public static string ConventionalEnvVar(string headerName) =>
-        "APIMCP_SECRET_" + new string(headerName.Trim().ToUpperInvariant().Select(c => char.IsAsciiLetterOrDigit(c) ? c : '_').ToArray());
-
-    // One line per mapping saying whether its environment variable has a value. Never includes the value.
-    public static IReadOnlyList<string> Status() =>
-        SecretNames()
-            .Select(n => $"{n} -> env[{SecretMappings[n]}]: " +
-                         (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(SecretMappings[n])) ? "NOT SET" : "value present"))
-            .ToList();
+        new string(headerName.Trim().ToUpperInvariant().Select(c => char.IsAsciiLetterOrDigit(c) ? c : '_').ToArray());
 }

@@ -140,8 +140,7 @@ internal static class HttpHelper
             return url;
 
         var separator = url.Contains('?') ? "&" : "?";
-        var processed = QueryParamStore.Apply(query.Trim().TrimStart('?'));
-        return url + separator + processed;
+        return url + separator + query.Trim().TrimStart('?');
     }
 
     private static void ApplyHeaders(HttpRequestMessage request, string? headersJson, bool skipContentType = false)
@@ -171,27 +170,12 @@ internal static class HttpHelper
 
                 if (prop.Value.ValueKind == System.Text.Json.JsonValueKind.Null)
                 {
+                    // A null value on a non-secret header is a mistake; on a secret
+                    // header it means "send no header" — do not inject the secret.
                     if (!HeaderStore.IsSecret(prop.Name))
                         throw new InvalidOperationException(
                             $"Header '{prop.Name}' has no value and no secret mapping is configured for it. " +
-                            "Call get_server_status to see what this server process loaded; configuration changes only apply after the MCP server restarts.");
-                    if (!HeaderStore.AllowPlain)
-                        continue;
-                    // In allow-plain mode, explicit null means "inject the secret".
-                    var secretOnly = HeaderStore.Resolve(prop.Name, null);
-                    if (string.IsNullOrEmpty(secretOnly))
-                        continue;
-                    if (ContentHeaderNames.Contains(prop.Name))
-                    {
-                        request.Content ??= new System.Net.Http.StringContent("");
-                        request.Content.Headers.Remove(prop.Name);
-                        request.Content.Headers.TryAddWithoutValidation(prop.Name, secretOnly);
-                    }
-                    else
-                    {
-                        request.Headers.Remove(prop.Name);
-                        request.Headers.TryAddWithoutValidation(prop.Name, secretOnly);
-                    }
+                            "Configuration changes only apply after the MCP server restarts.");
                     continue;
                 }
                 if (prop.Value.ValueKind != System.Text.Json.JsonValueKind.String)

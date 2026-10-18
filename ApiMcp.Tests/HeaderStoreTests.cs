@@ -5,16 +5,17 @@ namespace ApiMcp.Tests;
 
 public sealed class HeaderStoreTests : IDisposable
 {
-    private const string TokenEnvVar = "APIMCP_TEST_TOKEN_XYZ";
-    private const string KeyEnvVar = "APIMCP_TEST_KEY_XYZ";
+    private const string AuthEnvVar = "AUTHORIZATION";
+    private const string KeyEnvVar = "X_API_KEY";
+    private const string DynEnvVar = "APIMCP_TEST_DYNAMIC_HEADER";
     private readonly Dictionary<string, string?> _originalEnv = new();
 
     public HeaderStoreTests()
     {
         HeaderStore.Clear();
-        SaveAndClear(TokenEnvVar);
+        SaveAndClear(AuthEnvVar);
         SaveAndClear(KeyEnvVar);
-        SaveAndClear("APIMCP_HEADER_ENV");
+        SaveAndClear(DynEnvVar);
     }
 
     public void Dispose()
@@ -31,135 +32,50 @@ public sealed class HeaderStoreTests : IDisposable
     }
 
     [Fact]
-    public void LoadFromArgs_MapsSingleEntry()
+    public void LoadFromArgs_HeaderFlag_MapsToConventionalEnvVar()
     {
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", $"Authorization={TokenEnvVar}"]);
+        HeaderStore.LoadFromArgs(["--header", "X-API-KEY"]);
 
-        Assert.True(HeaderStore.IsSecret("Authorization"));
-        Assert.Equal(TokenEnvVar, HeaderStore.SecretMappings["Authorization"]);
+        Assert.Equal(KeyEnvVar, HeaderStore.SecretMappings["X-API-KEY"]);
     }
 
     [Fact]
-    public void LoadFromArgs_MapsMultipleFlagOccurrences()
+    public void LoadFromArgs_HeaderFlag_IsRepeatable()
     {
-        HeaderStore.LoadFromArgsAndEnv(
-            ["--header-env", $"Authorization={TokenEnvVar}", "--header-env", $"X-Api-Key={KeyEnvVar}"]);
+        HeaderStore.LoadFromArgs(["--header", "X-API-KEY", "--header", "Authorization"]);
 
-        Assert.True(HeaderStore.IsSecret("Authorization"));
-        Assert.True(HeaderStore.IsSecret("X-Api-Key"));
+        Assert.Equal(KeyEnvVar, HeaderStore.SecretMappings["X-API-KEY"]);
+        Assert.Equal(AuthEnvVar, HeaderStore.SecretMappings["Authorization"]);
     }
 
     [Fact]
     public void LoadFromArgs_StopsAtNextFlag()
     {
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", $"Authorization={TokenEnvVar}", "--other"]);
+        HeaderStore.LoadFromArgs(["--header", "Authorization", "--other"]);
 
         Assert.True(HeaderStore.IsSecret("Authorization"));
         Assert.Single(HeaderStore.SecretMappings);
     }
 
     [Fact]
-    public void LoadFromArgs_EntryWithoutEquals_IsIgnored()
+    public void LoadFromArgs_HeaderFlag_ResolvesFromConventionalEnvVar()
     {
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", "no-equals-here"]);
-
-        Assert.Empty(HeaderStore.SecretMappings);
-    }
-
-    [Fact]
-    public void LoadFromArgs_EntryWithoutEquals_IsReportedAsConfigError()
-    {
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", "no-equals-here"]);
-
-        Assert.Contains(HeaderStore.ConfigErrors, e => e.Contains("no-equals-here"));
-    }
-
-    [Fact]
-    public void LoadFromArgs_EntryWithEmptyEnvVar_IsReportedAsConfigError()
-    {
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", "X-API-KEY="]);
-
-        Assert.Empty(HeaderStore.SecretMappings);
-        Assert.Contains(HeaderStore.ConfigErrors, e => e.Contains("X-API-KEY="));
-    }
-
-    [Fact]
-    public void LoadFromEnv_EntryWithEmptyEnvVar_IsReportedAsConfigError()
-    {
-        Environment.SetEnvironmentVariable("APIMCP_HEADER_ENV", "X-API-KEY=");
-        HeaderStore.LoadFromArgsAndEnv([]);
-
-        Assert.Contains(HeaderStore.ConfigErrors, e => e.Contains("APIMCP_HEADER_ENV") && e.Contains("X-API-KEY="));
-    }
-
-    [Fact]
-    public void LoadFromArgs_ValidEntries_ReportNoConfigErrors()
-    {
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", $"Authorization={TokenEnvVar}", "--secret-header", "X-API-KEY"]);
-
-        Assert.Empty(HeaderStore.ConfigErrors);
-    }
-
-    [Fact]
-    public void LoadFromArgs_SecretHeaderFlag_MapsToConventionalEnvVar()
-    {
-        HeaderStore.LoadFromArgsAndEnv(["--secret-header", "X-API-KEY"]);
-
-        Assert.Equal("APIMCP_SECRET_X_API_KEY", HeaderStore.SecretMappings["X-API-KEY"]);
-    }
-
-    [Fact]
-    public void LoadFromArgs_SecretHeaderFlag_ResolvesFromConventionalEnvVar()
-    {
-        SaveAndClear("APIMCP_SECRET_X_API_KEY");
-        Environment.SetEnvironmentVariable("APIMCP_SECRET_X_API_KEY", "conventional-secret");
-        HeaderStore.LoadFromArgsAndEnv(["--secret-header", "X-API-KEY"]);
+        Environment.SetEnvironmentVariable(KeyEnvVar, "conventional-secret");
+        HeaderStore.LoadFromArgs(["--header", "X-API-KEY"]);
 
         Assert.Equal("conventional-secret", HeaderStore.Resolve("X-API-KEY", null));
     }
 
     [Fact]
-    public void LoadFromArgs_SecretHeaderFlag_IsRepeatable()
-    {
-        HeaderStore.LoadFromArgsAndEnv(["--secret-header", "X-API-KEY", "--secret-header", "Authorization"]);
-
-        Assert.Equal("APIMCP_SECRET_AUTHORIZATION", HeaderStore.SecretMappings["Authorization"]);
-        Assert.True(HeaderStore.IsSecret("x-api-key"));
-    }
-
-    [Fact]
     public void ConventionalEnvVar_UppercasesAndReplacesNonAlphanumerics()
     {
-        Assert.Equal("APIMCP_SECRET_X_API_KEY", HeaderStore.ConventionalEnvVar("x-api.key"));
-    }
-
-    [Fact]
-    public void Status_ReportsPresenceWithoutRevealingValue()
-    {
-        Environment.SetEnvironmentVariable(TokenEnvVar, "super-secret-value");
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", $"Authorization={TokenEnvVar}", "--header-env", $"X-API-KEY={KeyEnvVar}"]);
-
-        var status = HeaderStore.Status();
-
-        Assert.Contains($"Authorization -> env[{TokenEnvVar}]: value present", status);
-        Assert.Contains($"X-API-KEY -> env[{KeyEnvVar}]: NOT SET", status);
-        Assert.DoesNotContain("super-secret-value", string.Join("\n", status));
-    }
-
-    [Fact]
-    public void LoadFromEnv_SemicolonSeparated_MapsAllEntries()
-    {
-        Environment.SetEnvironmentVariable("APIMCP_HEADER_ENV", $"Authorization={TokenEnvVar};X-Api-Key={KeyEnvVar}");
-        HeaderStore.LoadFromArgsAndEnv([]);
-
-        Assert.True(HeaderStore.IsSecret("authorization"));
-        Assert.True(HeaderStore.IsSecret("x-api-key"));
+        Assert.Equal("X_API_KEY", HeaderStore.ConventionalEnvVar("x-api.key"));
     }
 
     [Fact]
     public void IsSecret_IsCaseInsensitive()
     {
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", $"Authorization={TokenEnvVar}"]);
+        HeaderStore.LoadFromArgs(["--header", "Authorization"]);
 
         Assert.True(HeaderStore.IsSecret("AUTHORIZATION"));
         Assert.True(HeaderStore.IsSecret("authorization"));
@@ -168,8 +84,8 @@ public sealed class HeaderStoreTests : IDisposable
     [Fact]
     public void Resolve_ReturnsEnvValue_OverLlmValue()
     {
-        Environment.SetEnvironmentVariable(TokenEnvVar, "the-secret");
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", $"Authorization={TokenEnvVar}"]);
+        Environment.SetEnvironmentVariable(AuthEnvVar, "the-secret");
+        HeaderStore.LoadFromArgs(["--header", "Authorization"]);
 
         Assert.Equal("the-secret", HeaderStore.Resolve("Authorization", "forged-by-llm"));
     }
@@ -177,20 +93,19 @@ public sealed class HeaderStoreTests : IDisposable
     [Fact]
     public void Resolve_MissingEnvVar_ThrowsUsefulError()
     {
-        Environment.SetEnvironmentVariable(TokenEnvVar, null);
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", $"Authorization={TokenEnvVar}"]);
+        HeaderStore.LoadFromArgs(["--header", "Authorization"]);
 
         var ex = Assert.Throws<InvalidOperationException>(() => HeaderStore.Resolve("Authorization", "anything"));
 
-        Assert.Contains(TokenEnvVar, ex.Message);
+        Assert.Contains(AuthEnvVar, ex.Message);
         Assert.Contains("not set", ex.Message);
     }
 
     [Fact]
     public void Resolve_NullLlmValueOnSecret_StillResolvesSecret()
     {
-        Environment.SetEnvironmentVariable(TokenEnvVar, "from-env");
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", $"Authorization={TokenEnvVar}"]);
+        Environment.SetEnvironmentVariable(AuthEnvVar, "from-env");
+        HeaderStore.LoadFromArgs(["--header", "Authorization"]);
 
         Assert.Equal("from-env", HeaderStore.Resolve("Authorization", null));
     }
@@ -203,11 +118,44 @@ public sealed class HeaderStoreTests : IDisposable
     }
 
     [Fact]
-    public void SecretNames_AreOrderedCaseInsensitively()
+    public void Resolve_EnvReference_ReadsEnvironment()
     {
-        HeaderStore.LoadFromArgsAndEnv(["--header-env", $"b-header={KeyEnvVar}", "--header-env", $"auth={TokenEnvVar}"]);
+        Environment.SetEnvironmentVariable(DynEnvVar, "from-env");
 
-        Assert.Equal(["auth", "b-header"], HeaderStore.SecretNames());
+        Assert.Equal("from-env", HeaderStore.Resolve("X-Custom", "${" + DynEnvVar + "}"));
+    }
+
+    [Fact]
+    public void Resolve_EnvReference_InterpolatesWithinValue()
+    {
+        Environment.SetEnvironmentVariable(DynEnvVar, "abc123");
+
+        Assert.Equal("Bearer abc123", HeaderStore.Resolve("X-Custom", "Bearer ${" + DynEnvVar + "}"));
+    }
+
+    [Fact]
+    public void Resolve_EnvReference_MissingEnvVar_ThrowsUsefulError()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => HeaderStore.Resolve("X-Custom", "${" + DynEnvVar + "}"));
+
+        Assert.Contains(DynEnvVar, ex.Message);
+        Assert.Contains("not set", ex.Message);
+    }
+
+    [Fact]
+    public void Resolve_UnterminatedReference_IsLiteral()
+    {
+        Assert.Equal("${", HeaderStore.Resolve("X-Custom", "${"));
+        Assert.Equal("$", HeaderStore.Resolve("X-Custom", "$"));
+    }
+
+    [Fact]
+    public void Resolve_Secret_IgnoresEnvReference()
+    {
+        Environment.SetEnvironmentVariable(AuthEnvVar, "derived-secret");
+        HeaderStore.LoadFromArgs(["--header", "Authorization"]);
+
+        Assert.Equal("derived-secret", HeaderStore.Resolve("Authorization", "${" + DynEnvVar + "}"));
     }
 
     [Fact]
