@@ -2,53 +2,77 @@
 
 [![NuGet version](https://img.shields.io/nuget/v/ApiMcp.Dnx.svg)](https://www.nuget.org/packages/ApiMcp.Dnx/)
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) server for calling HTTP APIs. Built on the official **MCP C# SDK 2.0** (`ModelContextProtocol`) and **.NET 10**, over **stdio**. Use it as an API client and testing tool for your LLM tool-calling workflow: the LLM can send GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS / QUERY requests with custom headers, query strings and bodies — while secrets are sourced from environment variables on the server side and are never exposed to the model.
+An MCP server that lets your LLM call HTTP APIs. Built on the official **MCP C# SDK 2.0** (`ModelContextProtocol`) and **.NET 10**, over **stdio**. Send GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS / QUERY requests with headers, query strings, bodies and file uploads, parse OpenAPI/Swagger documents, and run Postman collections. Secrets stay on the server side and are never exposed to the model.
 
-## Quick start with `dnx`
+## Quick start
 
-Requires the .NET 10 SDK. Run the latest published package directly from NuGet.org:
+Requires the **.NET 10 SDK**. Nothing to install — `dnx` runs the published package straight from NuGet.org:
 
 ```
 dnx ApiMcp.Dnx@1.4.0 --yes
 ```
 
-Configure it in your MCP client:
+Add it to your MCP client:
 
 ```json
 {
   "mcpServers": {
     "api": {
       "command": "dnx",
-      "args": ["ApiMcp.Dnx@1.4.0", "--yes", "--header", "X-Api-Key", "--header", "X-Api-ID"],
-      "env": {
-        "X_API_KEY": "your-secret-key",
-        "X_API_ID": "123"
-      }
+      "args": ["ApiMcp.Dnx@1.4.0", "--yes"]
     }
   }
 }
 ```
 
-Or with the Claude Code CLI, in one line:
+That is all you need. Now just ask the model to call an API:
+
+> Use `http_request` to GET https://dummyjson.com/products/1 and show me the JSON.
+
+Or register it with the Claude Code CLI in one line:
 
 ```
-claude mcp add api --scope user -e X_API_KEY=your-secret-key -- dnx ApiMcp.Dnx@1.4.0 --yes --header X-Api-Key
+claude mcp add api --scope user -- dnx ApiMcp.Dnx@1.4.0 --yes
 ```
 
-Configuration is read once at startup: after changing it, restart the MCP server (in Claude Code, start a new session). The configured secret header names are logged to stderr at startup; values are never logged.
+Configuration is read once at startup: after changing it, restart the MCP server (in Claude Code, start a new session). Config is passed on the command line via `args` and read from the process `env`.
 
 ## Tools
 
-| Tool | Description | Parameters |
-| --- | --- | --- |
-| `http_request` | Sends an HTTP request and returns status, headers, and body. | `method` (required), `url` (required), `headers` (optional JSON object), `query` (optional raw query string), `body` (optional), `multipart` (optional JSON object for file uploads), `timeoutSeconds`, `followRedirects` |
-| `parse_openapi` | Parses an OpenAPI/Swagger JSON or YAML document into testable endpoints, including parameters, content types, schemas, and generated example request bodies. | `url` or `specification` (one required), `headers` (optional) |
+| Tool | What it does |
+| --- | --- |
+| `http_request` | Sends an HTTP request and returns the status, response headers, and body. |
+| `parse_openapi` | Parses an OpenAPI/Swagger JSON or YAML document into testable endpoints (parameters, content types, schemas, and a generated example body). |
+| `parse_postman_collection` | Parses a Postman collection (v2.1) into its requests, resolved variables, auth, bodies, and embedded `pm.test` assertions. |
+| `run_postman_collection` | Runs every request in a Postman collection against the live servers and evaluates the embedded `pm.test` assertions (PASS/FAIL per assertion). |
 
-`http_request` supports `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, and `QUERY`. `QUERY` is a safe, idempotent method for sending a query in the request body (like a read-only POST; RFC 9110 extension). Query strings are appended to the URL as-is; bodies default to `application/json` when they look like JSON. Responses are rendered as status line + response headers + body (bodies over 100 KB are truncated).
+### `http_request`
+
+| Parameter | Notes |
+| --- | --- |
+| `method` *(required)* | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, `QUERY` |
+| `url` *(required)* | Absolute URL |
+| `headers` | JSON object, e.g. `{"Content-Type": "application/json"}` |
+| `query` | Raw query string, appended to the URL as-is, e.g. `"page=1&size=10"` |
+| `body` | Raw request body. JSON-looking bodies default to `Content-Type: application/json` |
+| `multipart` | JSON object for `multipart/form-data` file uploads (see below) |
+| `timeoutSeconds` | Default `30` |
+| `followRedirects` | Default `true` |
+
+`QUERY` is a safe, idempotent method for sending a query in the request body (like a read-only POST; RFC 9110 extension). Responses are rendered as status line + response headers + body; bodies over 100 KB are truncated.
+
+```json
+{
+  "method": "POST",
+  "url": "https://api.example.com/orders",
+  "headers": { "Content-Type": "application/json" },
+  "body": "{\"sku\":\"A1\",\"qty\":2}"
+}
+```
 
 ### Multipart (file upload)
 
-Use `multipart` to send `multipart/form-data` (single or multiple files) instead of a raw `body` (when set, `body` is ignored and the multipart Content-Type with its boundary overrides any you pass):
+Use `multipart` to send `multipart/form-data` (single or more files) instead of a raw `body`. When `multipart` is set, `body` is ignored and the multipart Content-Type (with its boundary) overrides any you pass:
 
 ```
 http_request(
@@ -68,87 +92,68 @@ Each file entry needs either `path` (a local file on the server) or `contentBase
 
 Paths are read with the server's own permissions. To limit which directories the server may read, set `APIMCP_FILE_ROOTS` to a semicolon- or newline-separated list of allowed directories; any path outside those roots is rejected.
 
-### OpenAPI / Swagger parsing
+### `parse_openapi`
 
-Use `parse_openapi` before testing an unfamiliar API. It accepts either a URL to `swagger.json` / `openapi.json` (or YAML) or the raw specification text.
-
-For each endpoint it returns:
-
-- HTTP method and path
-- path/query/header parameters, including required flags and schema examples
-- every request-body content type
-- request-body schema, including referenced component schemas
-- a generated `requestBody.example` suitable for sending as the `body` argument of `http_request`
-
-Example:
+Use it before testing an unfamiliar API. It accepts either a URL to `swagger.json` / `openapi.json` / YAML, or the raw specification text (`url` or `specification`, exactly one). For each endpoint it returns the method/path, path/query/header parameters, every request-body content type, the request-body schema (including referenced component schemas), and a generated `requestBody.example` ready to send as the `body` argument of `http_request`.
 
 ```
 parse_openapi(url: "https://example.com/swagger/v1/swagger.json")
 ```
 
-For a JSON endpoint, use the returned example directly:
+Public documents to try without your own API:
+
+- Swagger 2.0: `parse_openapi(url: "https://petstore.swagger.io/v2/swagger.json")`
+- OpenAPI 3.x: `parse_openapi(url: "https://petstore3.swagger.io/api/v3/openapi.json")`
+
+End-to-end: `parse_openapi` → pick `POST /pet` → copy `requestBody.example` → send it with `http_request`.
+
+### Postman collections
+
+Parse a collection to inspect it, or run it and get per-assertion PASS/FAIL:
 
 ```
-http_request(
-  method: "POST",
-  url: "https://example.com/api/orders",
-  headers: {"Content-Type": "application/json"},
-  body: "{...the generated requestBody.example...}"
-)
+parse_postman_collection(path: "C:\\work\\collection.json")
+run_postman_collection(path: "C:\\work\\collection.json", variables: {"base_url": "http://127.0.0.1:8080"})
 ```
 
-The parser supports OpenAPI 3.x and Swagger 2.0 JSON/YAML through Microsoft.OpenApi.
+Provide exactly one source: `specification` (raw JSON), `path` (local file), or `url`. The runner applies the common API-key/bearer/basic auth types automatically, resolves `{{variables}}` in the URL, headers, and body, and supports `pm.collectionVariables/environment/variables/globals.set("name", ...)` so later requests can reuse values. Requests run in order. A request with no recognized `pm.test` assertion is reported as `[NOTEST]` and is not counted as passed.
 
-#### Public Swagger test documents
+## Secrets
 
-Use the public Swagger Petstore documents to test `parse_openapi` without setting up your own API. Swagger's own documentation references the Petstore Swagger URL, and Swagger UI also uses a public Petstore OpenAPI definition as its example. citeturn0search0turn0search6
+Secrets are environment variables on the server. The model can *use* them but never *sees* them. There are two mechanisms.
 
-Swagger 2.0:
+### 1. Server-owned header (`--header NAME`)
 
-```
-parse_openapi(url: "https://petstore.swagger.io/v2/swagger.json")
-```
+Declare a header name the server owns; its value is read from the environment variable named after it (upper-cased, every non-alphanumeric character replaced by `_`). The model passes only the name and any value it sends is ignored.
 
-OpenAPI 3.x:
-
-```
-parse_openapi(url: "https://petstore3.swagger.io/api/v3/openapi.json")
-```
-
-End-to-end test:
-
-```
-1. parse_openapi(url: "https://petstore3.swagger.io/api/v3/openapi.json")
-2. Select POST /pet
-3. Take the returned requestBody.example
-4. Call http_request(method: "POST", url: "<baseUrl>/pet", headers: {"Content-Type": "application/json"}, body: "<example>")
+```json
+{
+  "mcpServers": {
+    "api": {
+      "command": "dnx",
+      "args": ["ApiMcp.Dnx@1.4.0", "--yes", "--header", "X-Api-Key", "--header", "Authorization"],
+      "env": {
+        "X_API_KEY": "your-secret-key",
+        "AUTHORIZATION": "Bearer your-token"
+      }
+    }
+  }
+}
 ```
 
-The OpenAPI specification is designed so tools can understand and interact with HTTP APIs with minimal implementation logic. citeturn0search11
+The model then calls, for example, `http_request(method: "GET", url: "https://api.example.com/me", headers: {"X-Api-Key": "anything"})` and the server injects the real value. `{"X-Api-Key": null}` sends no such header.
 
-### Secret headers
+### 2. Inline environment reference (`${NAME}`)
 
-Sensitive headers are declared server-side by **name** with `--header NAME` (repeatable). When the LLM sends a request that includes one of these header names, the server replaces the value with the one read from the matching environment variable. The model never sees the secret and cannot override it.
-
-The environment variable is named after the header: upper-cased, with every non-alphanumeric character replaced by `_` (`X-API-KEY` → `X_API_KEY`, `Authorization` → `AUTHORIZATION`):
-
-```
-dnx ApiMcp.Dnx@1.4.0 --yes --header X-API-KEY --header Authorization
-```
-
-The LLM includes these header names in the `headers` object of `http_request`; the running server injects the real value.
-
-#### Values from environment variables
-
-Independently of `--header`, any `${NAME}` in a header value the caller sends is replaced by the value of the server's environment variable `NAME`. For example:
+Independently of `--header`, any `${NAME}` in a header value is replaced by the value of the server's environment variable `NAME`. This works anywhere in the value:
 
 ```json
 { "headers": { "X-Request-Token": "${REQ_TOKEN}", "Authorization": "Bearer ${TOKEN}" } }
 ```
 
-The value is never returned to the model. If a referenced variable is unset or empty the request fails with a clear error. A header declared with `--header` takes precedence and reads its own name-derived variable, so `${...}` is ignored for it.
+If a referenced variable is unset or empty, the request fails with a clear error. A header declared with `--header` takes precedence and reads its own name-derived variable, so `${...}` is ignored for it.
 
-## Build & Run
+## Build & run from source
 
 ```
 cd ApiMcp
@@ -156,7 +161,7 @@ dotnet build
 ```
 
 ```
-# Windows Auth-free local run (set AUTHORIZATION to the token first)
+# local run with a secret header (set AUTHORIZATION to the token first)
 dotnet run -- --header Authorization
 ```
 
@@ -173,25 +178,25 @@ Logs go to stderr only (stdout is reserved for MCP JSON). Secret values never ap
 
 ```
 cd ApiMcp
-dotnet publish -c Release -r win-x64 /p:PublishAot=false /p:PublishSingleFile=true --self-contained false -o .\\bin\\publish-single
+dotnet publish -c Release -r win-x64 /p:PublishAot=false /p:PublishSingleFile=true --self-contained false -o .\bin\publish-single
 ```
 
 ### Native AOT (fast startup, no runtime install)
 
 ```
-$env:PATH = "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer;" + $env:PATH
-dotnet publish -c Release -r win-x64 -o .\\bin\\publish-aot
+$env:PATH = "C:\Program Files (x86)\Microsoft Visual Studio\Installer;" + $env:PATH
+dotnet publish -c Release -r win-x64 -o .\bin\publish-aot
 ```
 
 ## NuGet publishing
 
-Pushing a `v*` tag triggers the `.github/workflows/dnx.yml` workflow, which packs `ApiMcp.Dnx` and publishes it to NuGet.org using **OIDC trusted publishing** (no API key stored in the repo). You can also trigger it manually via *Actions → Run workflow* with an optional `package_version`.
+Pushing a `v*` tag (e.g. `v1.4.0`) triggers `.github/workflows/dnx.yml`, which packs `ApiMcp.Dnx` and publishes it to NuGet.org using **OIDC trusted publishing** (no API key stored in the repo). You can also trigger it manually via *Actions → Run workflow* with an optional `package_version`.
 
 ## Testing example (public CRUD API with auth)
 
 [DummyJSON](https://dummyjson.com/docs/auth) is a free API with JWT auth and full CRUD — ideal for trying the server. `emilys` / `emilyspass` is a public demo account.
 
-1. Login to get an access token:
+1. Log in to get an access token:
 
 ```
 http_request(
@@ -202,7 +207,7 @@ http_request(
 )
 ```
 
-The response body contains `accessToken` (and `refreshToken`). Use it as a Bearer token in the next calls.
+The response body contains `accessToken` (and `refreshToken`). Use it in the next calls.
 
 2. Call an auth-protected endpoint:
 
@@ -235,17 +240,11 @@ http_request(
 )
 ```
 
-> Tip: because the token is dynamic, it is fine to pass it literally. For a **fixed** secret (e.g. a GitHub PAT), prefer a secret header mapping so the value never reaches the model:
+> Tip: because the DummyJSON token is dynamic, it is fine to pass it literally. For a **fixed** secret (e.g. a GitHub PAT), declare it once with `--header` so the value never reaches the model:
 
 ```
 dnx ApiMcp.Dnx@1.4.0 --yes --header Authorization   # reads the token from env AUTHORIZATION
 # then call: http_request(method: "GET", url: "https://api.github.com/user", headers: {"Authorization": "ignored"})
-```
-
-### Running over `dnx` (no install)
-
-```
-dnx ApiMcp.Dnx@1.4.0 --yes
 ```
 
 ## License
