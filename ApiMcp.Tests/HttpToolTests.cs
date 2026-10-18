@@ -85,4 +85,51 @@ public sealed class HttpToolTests : IDisposable
 
         Assert.Contains("not a valid absolute URL", result);
     }
+
+    [Fact]
+    public void HttpRequest_WithSelect_ReturnsProjectedBody()
+    {
+        using var server = new MiniHttpServer("{\"a\":1,\"b\":2}");
+        var tool = new HttpTool();
+
+        var result = tool.HttpRequest("GET", server.Url, select: "$.a");
+
+        Assert.Contains("Selected ($.a)", result);
+        Assert.DoesNotContain("\"b\"", result);
+    }
+
+    [Fact]
+    public void HttpRequest_WithCapture_ReportsCaptured()
+    {
+        using var server = new MiniHttpServer("{\"token\":\"t1\"}", responseContentType: "application/json");
+        var tool = new HttpTool();
+
+        var result = tool.HttpRequest("GET", server.Url, capture: JsonDocument.Parse("{\"vt_tool\":\"$.token\"}").RootElement);
+
+        Assert.Contains("Captured:", result);
+        Assert.Contains("vt_tool = t1", result);
+    }
+
+    [Fact]
+    public void HttpRequest_WithAssertions_ReportsPass()
+    {
+        using var server = new MiniHttpServer("ok");
+        var tool = new HttpTool();
+
+        var result = tool.HttpRequest("GET", server.Url, expectStatus: 200, expectBodyContains: "ok");
+
+        Assert.Contains("[PASS] assertions (2/2)", result);
+        Assert.Contains("HTTP 200", result);
+    }
+
+    [Fact]
+    public void HttpRequest_AssertionFailure_ReportsFail()
+    {
+        using var server = new MiniHttpServer("ok");
+        var tool = new HttpTool();
+
+        var result = tool.HttpRequest("GET", server.Url, expectStatus: 201);
+
+        Assert.Contains("[FAIL] assertions (0/1)", result);
+    }
 }

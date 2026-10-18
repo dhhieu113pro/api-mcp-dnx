@@ -26,7 +26,11 @@ internal static class HttpHelper
         string? body,
         string? multipartJson,
         int timeoutSeconds,
-        bool followRedirects)
+        bool followRedirects,
+        int? expectStatus = null,
+        string? expectBodyContains = null,
+        string? select = null,
+        string? capture = null)
     {
         try
         {
@@ -37,8 +41,12 @@ internal static class HttpHelper
             if (!AllowedMethods.Contains(method))
                 return $"Error: unsupported HTTP method '{method}'. Allowed: {string.Join(", ", AllowedMethods.OrderBy(m => m))}.";
 
+            url = VariableStore.Interpolate(url);
             if (!Uri.TryCreate(url, UriKind.Absolute, out _))
                 return $"Error: '{url}' is not a valid absolute URL.";
+
+            query = query is null ? null : VariableStore.Interpolate(query);
+            body = body is null ? null : VariableStore.Interpolate(body);
 
             url = ApplyQueryString(url, query);
 
@@ -54,21 +62,24 @@ internal static class HttpHelper
             if (!string.IsNullOrWhiteSpace(multipartJson))
             {
                 // Multipart sets its own boundary; ignore any user-supplied Content-Type.
-                ApplyMultipart(request, multipartJson);
-                ApplyHeaders(request, headersJson, skipContentType: true);
+                ApplyMultipart(request, multipartJson, interpolateVariables: true);
+                ApplyHeaders(request, headersJson, skipContentType: true, interpolateVariables: true);
             }
             else
             {
                 // Body first so content headers (e.g. Content-Type) have an HttpContent to attach to.
                 ApplyBody(request, body, headersJson);
-                ApplyHeaders(request, headersJson);
+                ApplyHeaders(request, headersJson, interpolateVariables: true);
             }
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             using var response = client.Send(request, HttpCompletionOption.ResponseContentRead);
             sw.Stop();
 
-            return RenderResponse(response, sw.ElapsedMilliseconds);
+            var content = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            var captured = ApplyCapture(capture, content);
+            var assertions = BuildAssertions(expectStatus, expectBodyContains, (int)response.StatusCode, content);
+            return captured + assertions + RenderResponse(response, content, sw.ElapsedMilliseconds, select);
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
@@ -77,6 +88,11 @@ internal static class HttpHelper
         catch (HttpRequestException ex)
         {
             return $"Error: HTTP request failed: {ex.Message}";
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Input / templating / capture errors (headers, multipart, variables, ...).
+            return $"Error: {ex.Message}";
         }
         catch (Exception ex)
         {
@@ -143,7 +159,7 @@ internal static class HttpHelper
         return url + separator + query.Trim().TrimStart('?');
     }
 
-    private static void ApplyHeaders(HttpRequestMessage request, string? headersJson, bool skipContentType = false)
+    private static void ApplyHeaders(HttpRequestMessage request, string? headersJson, bool skipContentType = false, bool interpolateVariables = false)
     {
         if (string.IsNullOrWhiteSpace(headersJson))
             return;
@@ -181,7 +197,10 @@ internal static class HttpHelper
                 if (prop.Value.ValueKind != System.Text.Json.JsonValueKind.String)
                     throw new InvalidOperationException($"Header '{prop.Name}' value must be a JSON string.");
 
-                var resolved = HeaderStore.Resolve(prop.Name, prop.Value.GetString());
+                var raw = prop.Value.GetString()!;
+                if (interpolateVariables)
+                    raw = VariableStore.Interpolate(raw);
+                var resolved = HeaderStore.Resolve(prop.Name, raw);
                 if (string.IsNullOrEmpty(resolved))
                     continue;
 
@@ -200,7 +219,7 @@ internal static class HttpHelper
         }
     }
 
-    private static void ApplyMultipart(HttpRequestMessage request, string multipartJson)
+    private static void ApplyMultipart(HttpRequestMessage request, string multipartJson, bool interpolateVariables = false)
     {
         System.Text.Json.JsonDocument doc;
         try
@@ -229,6 +248,8 @@ internal static class HttpHelper
                     var value = f.Value.ValueKind == System.Text.Json.JsonValueKind.String
                         ? f.Value.GetString()!
                         : f.Value.GetRawText();
+                    if (interpolateVariables)
+                        value = VariableStore.Interpolate(value);
                     form.Add(new System.Net.Http.StringContent(value), f.Name);
                     count++;
                 }
@@ -376,7 +397,74 @@ internal static class HttpHelper
         return "text/plain";
     }
 
-    private static string RenderResponse(HttpResponseMessage response, long elapsedMs)
+    private static string ApplyCapture(string? captureJson, string content)
+    {
+        if (string.IsNullOrWhiteSpace(captureJson))
+            return "";
+
+        System.Text.Json.JsonDocument doc;
+        try
+        {
+            doc = System.Text.Json.JsonDocument.Parse(captureJson);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            throw new InvalidOperationException("'capture' must be a JSON object like {\"token\":\"$.accessToken\"}.", ex);
+        }
+
+        using (doc)
+        {
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+                throw new InvalidOperationException("'capture' must be a JSON object.");
+            if (!doc.RootElement.EnumerateObject().Any())
+                return "";
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("Captured:");
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                if (prop.Value.ValueKind != System.Text.Json.JsonValueKind.String)
+                    throw new InvalidOperationException($"'capture' value for '{prop.Name}' must be a JSON string path.");
+
+                var path = prop.Value.GetString()!;
+                try
+                {
+                    var value = JsonSelector.SelectScalar(content, path);
+                    VariableStore.Set(prop.Name, value);
+                    sb.AppendLine($"  {prop.Name} = {Display(value)}");
+                }
+                catch (Exception ex)
+                {
+                    sb.AppendLine($"  {prop.Name} = <failed: {ex.Message}>");
+                }
+            }
+            return sb.ToString();
+        }
+    }
+
+    private static string Display(string value) =>
+        value.Length > 120 ? value[..120] + "..." : value;
+
+    private static string BuildAssertions(int? expectStatus, string? expectBodyContains, int status, string content)
+    {
+        var checks = new List<(string Label, bool Passed, string FailDetail)>();
+        if (expectStatus is { } expectedStatus)
+            checks.Add(($"status == {expectedStatus}", status == expectedStatus, $"got {status}"));
+        if (!string.IsNullOrEmpty(expectBodyContains))
+            checks.Add(($"body contains \"{expectBodyContains}\"", content.Contains(expectBodyContains, StringComparison.Ordinal), "not found"));
+
+        if (checks.Count == 0)
+            return "";
+
+        var passed = checks.Count(c => c.Passed);
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"{(passed == checks.Count ? "[PASS]" : "[FAIL]")} assertions ({passed}/{checks.Count})");
+        foreach (var (label, ok, detail) in checks)
+            sb.AppendLine($"  {(ok ? "PASS" : "FAIL")} {label}{(ok ? "" : $" ({detail})")}");
+        return sb.ToString();
+    }
+
+    private static string RenderResponse(HttpResponseMessage response, string content, long elapsedMs, string? select)
     {
         var sb = new System.Text.StringBuilder();
 
@@ -392,8 +480,25 @@ internal static class HttpHelper
                 foreach (var v in h.Value)
                     sb.AppendLine($"  {h.Key}: {v}");
 
-        var content = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-        if (content.Length > MaxBodyChars)
+        if (select is not null)
+        {
+            string selected;
+            try
+            {
+                selected = JsonSelector.Select(content, select);
+            }
+            catch (Exception ex)
+            {
+                selected = $"Error: {ex.Message}";
+            }
+
+            sb.AppendLine();
+            sb.AppendLine($"Selected ({select}) ({selected.Length:N0} chars):");
+            sb.AppendLine(selected.Length > MaxBodyChars ? selected[..MaxBodyChars] : selected);
+            if (selected.Length > MaxBodyChars)
+                sb.AppendLine($"... truncated ({selected.Length - MaxBodyChars:N0} more chars)");
+        }
+        else if (content.Length > MaxBodyChars)
         {
             sb.AppendLine();
             sb.AppendLine($"Body ({content.Length:N0} chars, showing first {MaxBodyChars:N0}):");

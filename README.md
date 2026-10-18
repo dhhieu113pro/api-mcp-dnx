@@ -58,6 +58,10 @@ Configuration is read once at startup: after changing it, restart the MCP server
 | `multipart` | JSON object for `multipart/form-data` file uploads (see below) |
 | `timeoutSeconds` | Default `30` |
 | `followRedirects` | Default `true` |
+| `expectStatus` | Optional expected HTTP status code |
+| `expectBodyContains` | Optional substring the response body must contain |
+| `select` | Optional JSON path to return only part of a JSON response body |
+| `capture` | Optional JSON object mapping names to JSON paths, e.g. `{"token":"$.accessToken"}`; reuse with `{{token}}` |
 
 `QUERY` is a safe, idempotent method for sending a query in the request body (like a read-only POST; RFC 9110 extension). Responses are rendered as status line + response headers + body; bodies over 100 KB are truncated.
 
@@ -69,6 +73,61 @@ Configuration is read once at startup: after changing it, restart the MCP server
   "body": "{\"sku\":\"A1\",\"qty\":2}"
 }
 ```
+
+#### Assertions
+
+Pass `expectStatus` and/or `expectBodyContains` to assert on the response. The result then starts with a PASS/FAIL block, followed by the usual response:
+
+```
+http_request(method: "GET", url: "https://dummyjson.com/products/1", expectStatus: 200, expectBodyContains: "title")
+```
+
+```
+[PASS] assertions (2/2)
+  PASS status == 200
+  PASS body contains "title"
+HTTP 200 OK OK (123ms)
+...
+```
+
+On failure the block reports `[FAIL]` and what was seen (e.g. `FAIL status == 404 (got 200)`); the response is still returned below it.
+
+#### Selecting fields
+
+Pass `select` with a small JSON path to return only part of a JSON response, keeping noisy payloads out of the model's context:
+
+```
+http_request(method: "GET", url: "https://dummyjson.com/products", select: "$.products[*].{id,title,price}")
+```
+
+Path syntax: `$.a.b` navigates properties (a leading `$.`/`$` is optional), `[0]` indexes an array, `[*]` (or `[]`) takes all elements, `*` takes all properties, and `{x,y}` projects those fields. A path with a wildcard returns an array; otherwise the single matched value is returned. `select` requires a JSON response body.
+
+#### Capturing and reusing values
+
+`capture` saves values from a JSON response into named variables so later requests can reuse them with `{{name}}` — handy for multi-step flows (log in once, then reuse the token):
+
+```
+http_request(method: "POST", url: "https://dummyjson.com/auth/login",
+             body: "{\"username\":\"emilys\",\"password\":\"emilyspass\"}",
+             capture: {"token": "$.accessToken", "userId": "$.id"})
+```
+
+The result starts with a `Captured:` block:
+
+```
+Captured:
+  token = eyJhbGciOi...
+  userId = 1
+```
+
+Then reference the variables anywhere in `url`, `query`, `headers`, `body`, or `multipart` fields:
+
+```
+http_request(method: "GET", url: "https://dummyjson.com/auth/me",
+             headers: {"Authorization": "Bearer {{token}}"})
+```
+
+`capture` paths use the same syntax as `select` (JSON strings are stored unquoted). Variables live for the lifetime of the MCP server process. A missing variable is an error; a `capture` path that does not match is reported in the `Captured:` block without failing the request.
 
 ### Multipart (file upload)
 

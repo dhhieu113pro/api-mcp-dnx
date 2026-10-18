@@ -114,14 +114,104 @@ public sealed class HttpHelperTests
     }
 
     [Fact]
-    public void Headers_InvalidJson_ReturnsUnexpectedError()
+    public void Headers_InvalidJson_ReturnsError()
     {
         using var server = new MiniHttpServer("ok");
 
         var result = HttpHelper.Send("GET", server.Url, "not-a-json", null, null, null, 10, true);
 
-        Assert.Contains("Unexpected error:", result);
+        Assert.Contains("Error:", result);
         Assert.Contains("'headers' must be a JSON object like", result);
+    }
+
+    [Fact]
+    public void Assertions_AllPass_ReportsPass()
+    {
+        using var server = new MiniHttpServer("hello world");
+
+        var result = HttpHelper.Send("GET", server.Url, null, null, null, null, 10, true, expectStatus: 200, expectBodyContains: "hello");
+
+        Assert.Contains("[PASS] assertions (2/2)", result);
+        Assert.Contains("PASS status == 200", result);
+        Assert.Contains("PASS body contains \"hello\"", result);
+    }
+
+    [Fact]
+    public void Assertions_StatusMismatch_ReportsFailButReturnsResponse()
+    {
+        using var server = new MiniHttpServer("hello world");
+
+        var result = HttpHelper.Send("GET", server.Url, null, null, null, null, 10, true, expectStatus: 404);
+
+        Assert.Contains("[FAIL] assertions (0/1)", result);
+        Assert.Contains("FAIL status == 404 (got 200)", result);
+        Assert.Contains("HTTP 200", result);
+    }
+
+    [Fact]
+    public void Assertions_BodyNotFound_ReportsFail()
+    {
+        using var server = new MiniHttpServer("hello world");
+
+        var result = HttpHelper.Send("GET", server.Url, null, null, null, null, 10, true, expectBodyContains: "nope");
+
+        Assert.Contains("[FAIL] assertions (0/1)", result);
+        Assert.Contains("FAIL body contains \"nope\" (not found)", result);
+    }
+
+    [Fact]
+    public void Assertions_NotRequested_NoBlock()
+    {
+        using var server = new MiniHttpServer("hello world");
+
+        var result = HttpHelper.Send("GET", server.Url, null, null, null, null, 10, true);
+
+        Assert.DoesNotContain("[PASS]", result);
+        Assert.DoesNotContain("[FAIL]", result);
+    }
+
+    [Fact]
+    public void Select_ProjectsFields_FromArray()
+    {
+        using var server = new MiniHttpServer("{\"products\":[{\"id\":1,\"title\":\"a\",\"price\":9},{\"id\":2,\"title\":\"b\",\"price\":8}]}");
+
+        var result = HttpHelper.Send("GET", server.Url, null, null, null, null, 10, true, select: "$.products[*].{id,title}");
+
+        Assert.Contains("Selected ($.products[*].{id,title})", result);
+        Assert.Contains("\"id\": 1", result);
+        Assert.Contains("\"title\": \"a\"", result);
+        Assert.DoesNotContain("price", result);
+    }
+
+    [Fact]
+    public void Select_SingleValue_ReturnsScalar()
+    {
+        using var server = new MiniHttpServer("{\"accessToken\":\"abc123\"}");
+
+        var result = HttpHelper.Send("GET", server.Url, null, null, null, null, 10, true, select: "$.accessToken");
+
+        Assert.Contains("\"abc123\"", result);
+    }
+
+    [Fact]
+    public void Select_Wildcard_ReturnsProjectedArray()
+    {
+        using var server = new MiniHttpServer("{\"products\":[{\"id\":1},{\"id\":2}]}");
+
+        var result = HttpHelper.Send("GET", server.Url, null, null, null, null, 10, true, select: "$.products[*].{id}");
+
+        Assert.Contains("\"id\": 1", result);
+        Assert.Contains("\"id\": 2", result);
+    }
+
+    [Fact]
+    public void Select_NonJsonBody_ReturnsError()
+    {
+        using var server = new MiniHttpServer("not json");
+
+        var result = HttpHelper.Send("GET", server.Url, null, null, null, null, 10, true, select: "$.a");
+
+        Assert.Contains("requires a JSON response body", result);
     }
 
     [Fact]
